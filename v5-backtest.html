@@ -1,0 +1,486 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<title>Mega Passos V5 - Diagnóstico</title>
+
+<style>
+body{
+    font-family:Arial,sans-serif;
+    background:#07111f;
+    color:white;
+    margin:0;
+    padding:18px;
+}
+.container{
+    max-width:900px;
+    margin:auto;
+}
+h1{
+    font-size:34px;
+}
+h2{
+    margin-top:35px;
+    font-size:28px;
+}
+textarea{
+    width:100%;
+    height:300px;
+    box-sizing:border-box;
+    background:#111d30;
+    color:white;
+    border:2px solid #42516a;
+    border-radius:16px;
+    padding:15px;
+    font-size:16px;
+}
+button{
+    width:100%;
+    margin-top:18px;
+    padding:22px;
+    border:0;
+    border-radius:16px;
+    background:#82cf91;
+    color:#1738e8;
+    font-size:23px;
+    font-weight:bold;
+}
+.card{
+    background:#121e31;
+    padding:20px;
+    border-radius:18px;
+    margin-top:20px;
+}
+table{
+    width:100%;
+    border-collapse:collapse;
+    margin-top:15px;
+    font-size:16px;
+}
+th,td{
+    padding:11px 7px;
+    border-bottom:1px solid #435067;
+    text-align:center;
+}
+th{
+    color:#9bd6a6;
+}
+.good{
+    color:#82cf91;
+    font-weight:bold;
+}
+.bad{
+    color:#ff8585;
+    font-weight:bold;
+}
+.neutral{
+    color:#ffd36a;
+    font-weight:bold;
+}
+.small{
+    color:#aeb8ca;
+    line-height:1.5;
+}
+</style>
+</head>
+
+<body>
+
+<div class="container">
+
+<h1>MEGA PASSOS V5</h1>
+<p class="small">
+Diagnóstico walk-forward da V3 por faixa de passo.
+Cada concurso é analisado somente com os concursos anteriores.
+</p>
+
+<textarea id="historico"
+placeholder="Cole aqui o histórico.
+
+Exemplo:
+3067 01 04 17 33 41 52
+3066 04 06 09 13 28 48"></textarea>
+
+<button onclick="analisar()">ANALISAR V5</button>
+
+<div id="status"></div>
+<div id="resultado"></div>
+
+</div>
+
+<script>
+
+function parseHistorico(txt){
+
+    let linhas=txt.trim().split(/\n+/);
+    let concursos=[];
+
+    for(let linha of linhas){
+
+        let nums=linha.trim().split(/\s+/).map(Number);
+
+        if(nums.length < 7) continue;
+
+        let concurso=nums[0];
+        let dezenas=nums.slice(1,7);
+
+        if(!Number.isInteger(concurso)) continue;
+        if(new Set(dezenas).size!==6) continue;
+        if(!dezenas.every(n=>n>=1 && n<=60)) continue;
+
+        concursos.push({
+            concurso:concurso,
+            dezenas:dezenas
+        });
+    }
+
+    concursos.sort((a,b)=>a.concurso-b.concurso);
+
+    return concursos;
+}
+
+
+/*
+PASSO ATUAL:
+quantos concursos transcorreram desde a última
+aparição da dezena.
+
+Se saiu no concurso imediatamente anterior,
+passo = 1.
+*/
+
+function passoAtual(hist,n){
+
+    for(let i=hist.length-1;i>=0;i--){
+
+        if(hist[i].dezenas.includes(n)){
+            return hist.length-i;
+        }
+    }
+
+    return hist.length+1;
+}
+
+
+/*
+Modelo V3:
+probabilidade empírica condicional de sair
+exatamente no passo atual.
+
+Usamos suavização Beta/Laplace para evitar
+taxas extremas em amostras pequenas.
+*/
+
+function scoreV3(hist,n){
+
+    let aparicoes=[];
+
+    for(let i=0;i<hist.length;i++){
+        if(hist[i].dezenas.includes(n)){
+            aparicoes.push(i);
+        }
+    }
+
+    let passo=passoAtual(hist,n);
+
+    let chegou=0;
+    let saiu=0;
+
+    for(let j=1;j<aparicoes.length;j++){
+
+        let gap=aparicoes[j]-aparicoes[j-1];
+
+        if(gap>=passo){
+            chegou++;
+        }
+
+        if(gap===passo){
+            saiu++;
+        }
+    }
+
+    /*
+    Suavização:
+    prior aproximado de 10% por concurso.
+    */
+
+    let taxaAjustada=(saiu+1)/(chegou+10);
+
+    return {
+        dezena:n,
+        passo:passo,
+        chegou:chegou,
+        saiu:saiu,
+        score:taxaAjustada
+    };
+}
+
+
+function faixaPasso(p){
+
+    if(p<=3) return "1–3";
+    if(p<=6) return "4–6";
+    if(p<=10) return "7–10";
+    if(p<=15) return "11–15";
+
+    return "16+";
+}
+
+
+function analisar(){
+
+    let concursos=parseHistorico(
+        document.getElementById("historico").value
+    );
+
+    if(concursos.length<30){
+
+        alert("Cole pelo menos 30 concursos válidos.");
+        return;
+    }
+
+    /*
+    WALK-FORWARD
+
+    Começamos somente depois de 30 concursos
+    para dar um histórico mínimo ao modelo.
+    */
+
+    let inicio=30;
+
+    let faixas={
+        "1–3":{selecionadas:0,acertos:0},
+        "4–6":{selecionadas:0,acertos:0},
+        "7–10":{selecionadas:0,acertos:0},
+        "11–15":{selecionadas:0,acertos:0},
+        "16+":{selecionadas:0,acertos:0}
+    };
+
+    let totalTestes=0;
+
+    let top10Acertos=0;
+    let distribuicao=[0,0,0,0,0,0,0];
+
+    for(let alvo=inicio;alvo<concursos.length;alvo++){
+
+        let hist=concursos.slice(0,alvo);
+        let sorteadas=new Set(concursos[alvo].dezenas);
+
+        let ranking=[];
+
+        for(let n=1;n<=60;n++){
+            ranking.push(scoreV3(hist,n));
+        }
+
+        ranking.sort((a,b)=>{
+            if(b.score!==a.score){
+                return b.score-a.score;
+            }
+
+            if(b.chegou!==a.chegou){
+                return b.chegou-a.chegou;
+            }
+
+            return a.dezena-b.dezena;
+        });
+
+        let top10=ranking.slice(0,10);
+
+        let acertos=0;
+
+        for(let item of top10){
+
+            let faixa=faixaPasso(item.passo);
+
+            faixas[faixa].selecionadas++;
+
+            if(sorteadas.has(item.dezena)){
+
+                faixas[faixa].acertos++;
+                acertos++;
+            }
+        }
+
+        top10Acertos+=acertos;
+        distribuicao[acertos]++;
+        totalTestes++;
+    }
+
+
+    let media=top10Acertos/totalTestes;
+
+    let html=`
+    <div class="card">
+
+    <h2>DIAGNÓSTICO V5 CONCLUÍDO</h2>
+
+    <p>
+    ${concursos.length} concursos reconhecidos.<br>
+    Intervalo:
+    ${concursos[0].concurso}
+    até
+    ${concursos[concursos.length-1].concurso}
+    </p>
+
+    <p>
+    Concursos efetivamente testados:
+    <b>${totalTestes}</b>
+    </p>
+
+    <p>
+    Média de acertos no Top 10 V3:
+    <b>${media.toFixed(3)} / 6</b>
+    </p>
+
+    <p>
+    Baseline aleatório Top 10:
+    <b>1.000 / 6</b>
+    </p>
+
+    </div>
+
+
+    <div class="card">
+
+    <h2>DESEMPENHO POR FAIXA DE PASSO</h2>
+
+    <p class="small">
+    “Selecionadas” mostra quantas vezes dezenas daquela
+    faixa entraram no Top 10 da V3 durante o backtest.
+    “Acertos” mostra quantas dessas seleções realmente
+    apareceram no concurso seguinte.
+    </p>
+
+    <table>
+
+    <tr>
+        <th>Passo</th>
+        <th>Selecionadas</th>
+        <th>Acertos</th>
+        <th>Taxa</th>
+        <th>Baseline</th>
+        <th>Lift</th>
+    </tr>
+    `;
+
+
+    for(let nome of ["1–3","4–6","7–10","11–15","16+"]){
+
+        let f=faixas[nome];
+
+        let taxa=
+        f.selecionadas
+        ? f.acertos/f.selecionadas
+        : 0;
+
+        /*
+        Cada dezena individual tem probabilidade
+        marginal de aproximadamente 6/60 = 10%.
+        */
+
+        let baseline=0.10;
+
+        let lift=
+        baseline>0
+        ? taxa/baseline
+        : 0;
+
+        let classe=
+        lift>1.10 ? "good" :
+        lift<0.90 ? "bad" :
+        "neutral";
+
+        html+=`
+        <tr>
+            <td><b>${nome}</b></td>
+            <td>${f.selecionadas}</td>
+            <td>${f.acertos}</td>
+            <td>${(taxa*100).toFixed(1)}%</td>
+            <td>10.0%</td>
+            <td class="${classe}">
+                ${lift.toFixed(2)}×
+            </td>
+        </tr>
+        `;
+    }
+
+    html+=`
+    </table>
+    </div>
+
+
+    <div class="card">
+
+    <h2>DISTRIBUIÇÃO — TOP 10</h2>
+
+    <table>
+
+    <tr>
+        <th>Acertos</th>
+        <th>Concursos</th>
+        <th>%</th>
+    </tr>
+    `;
+
+    for(let k=0;k<=6;k++){
+
+        let qtd=distribuicao[k];
+
+        html+=`
+        <tr>
+            <td>${k}/6</td>
+            <td>${qtd}</td>
+            <td>
+            ${(100*qtd/totalTestes).toFixed(1)}%
+            </td>
+        </tr>
+        `;
+    }
+
+    html+=`
+    </table>
+    </div>
+
+
+    <div class="card">
+
+    <h2>COMO INTERPRETAR</h2>
+
+    <p class="small">
+
+    Lift acima de 1,00 significa que a faixa apresentou
+    taxa de acerto superior ao baseline marginal de 10%.
+
+    <br><br>
+
+    Lift abaixo de 1,00 significa desempenho inferior
+    ao baseline.
+
+    <br><br>
+
+    Uma faixa com lift alto mas poucas seleções deve ser
+    tratada com cautela. Precisamos observar simultaneamente
+    taxa, lift e tamanho da amostra.
+
+    </p>
+
+    </div>
+    `;
+
+
+    document.getElementById("status").innerHTML=
+    `<div class="card">
+    <b>BACKTEST WALK-FORWARD FINALIZADO</b><br>
+    Nenhum concurso futuro foi utilizado para calcular
+    o ranking do concurso que estava sendo testado.
+    </div>`;
+
+    document.getElementById("resultado").innerHTML=html;
+}
+
+</script>
+
+</body>
+</html>
