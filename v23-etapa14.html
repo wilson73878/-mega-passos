@@ -1,0 +1,224 @@
+
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Mega Passos V23 — Etapa 14</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#07111f;color:#f4f7fb;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif}
+main{max-width:1050px;margin:auto;padding:22px 15px 70px}
+h1{font-size:29px;margin:0 0 10px}
+h2{font-size:22px;margin:0 0 14px}
+p{line-height:1.55}
+.sub{color:#b2c1d5}
+.card{background:#152136;border-radius:19px;padding:20px;margin:18px 0;overflow-x:auto}
+textarea{width:100%;height:250px;padding:13px;border:1px solid #61718a;border-radius:12px;background:#091629;color:white;font-size:14px}
+button{width:100%;border:0;border-radius:12px;background:#86d292;color:#082b19;font-size:18px;font-weight:800;padding:17px;margin-top:12px}
+button:disabled{opacity:.5}
+table{border-collapse:collapse;width:100%;min-width:650px}
+td,th{border-bottom:1px solid #384860;padding:10px 7px;text-align:center;white-space:nowrap}
+th{color:#a5e0ad}
+.ok{color:#86d292;font-weight:bold}
+.bad{color:#ff9999;font-weight:bold}
+.warn{color:#ffd477;font-weight:bold}
+.barbox{height:14px;background:#314158;border-radius:10px;overflow:hidden;margin-top:12px}
+#bar{height:100%;width:0;background:#86d292}
+</style>
+</head>
+<body>
+<main>
+<h1>MEGA PASSOS V23 — ETAPA 14</h1>
+<p class="sub">Auditoria de robustez do F50. Validação cronológica sem otimização de parâmetros.</p>
+
+<section class="card">
+<h2>Histórico completo</h2>
+<p class="sub">Cole os concursos de 1 a 3066. Uma linha por concurso: número do concurso e seis dezenas. Não inclua 3067.</p>
+<textarea id="dados" placeholder="1 04 05 30 33 41 52&#10;2 09 37 39 41 43 49&#10;..."></textarea>
+<button id="btn" onclick="iniciar()">EXECUTAR AUDITORIA V23</button>
+<p id="status" class="sub">Aguardando histórico.</p>
+<div class="barbox"><div id="bar"></div></div>
+</section>
+
+<div id="saida"></div>
+</main>
+
+<script>
+"use strict";
+
+const INICIO=100;
+const OOS=2177;
+const KS=[6,10,15,20];
+const NOMES=["F50","Aleatório esperado"];
+
+function parseDados(txt){
+ const arr=[];
+ for(const linha of txt.trim().split(/\n+/)){
+  const n=linha.trim().split(/\s+/).map(Number);
+  if(n.length!==7)throw Error("Linha inválida: "+linha.slice(0,60));
+  const concurso=n[0],dezenas=n.slice(1);
+  if(!Number.isInteger(concurso)||dezenas.some(x=>!Number.isInteger(x)||x<1||x>60)||new Set(dezenas).size!==6)
+   throw Error("Concurso ou dezenas inválidas: "+linha.slice(0,60));
+  arr.push({concurso,dezenas});
+ }
+ arr.sort((a,b)=>a.concurso-b.concurso);
+ if(arr.length!==3066)throw Error("Esperados 3066 concursos; encontrados "+arr.length);
+ for(let i=0;i<arr.length;i++)
+  if(arr[i].concurso!==i+1)throw Error("Concurso ausente ou duplicado: "+(i+1));
+ return arr;
+}
+
+function comb(n,k){
+ if(k<0||k>n)return 0;
+ if(k===0||k===n)return 1;
+ k=Math.min(k,n-k);
+ let r=1;
+ for(let i=1;i<=k;i++)r=r*(n-k+i)/i;
+ return r;
+}
+
+function prob(k,x){
+ return comb(k,x)*comb(60-k,6-x)/comb(60,6);
+}
+
+function criarAcc(){
+ return {n:0,soma:Object.fromEntries(KS.map(k=>[k,0])),dist:[0,0,0,0,0,0,0]};
+}
+
+function registrar(a,rank,real){
+ const sorteadas=new Set(real);
+ a.n++;
+ for(const k of KS){
+  let h=0;
+  for(let j=0;j<k;j++)if(sorteadas.has(rank[j].d))h++;
+  a.soma[k]+=h;
+  if(k===10)a.dist[h]++;
+ }
+}
+
+function media(a,k){return a.soma[k]/a.n}
+function fmt(x,n=3){return Number(x).toFixed(n)}
+
+function stats(a){
+ const m=media(a,10);
+ const v=6*(10/60)*(1-10/60)*(54/59);
+ const ep=Math.sqrt(v/a.n);
+ return {m,ep,z:(m-1)/ep,lo:m-1.96*ep,hi:m+1.96*ep};
+}
+
+function rankingF50(hist,t){
+ const cont=new Int16Array(61);
+ for(let i=t-50;i<t;i++)
+  for(const d of hist[i].dezenas)cont[d]++;
+ const rank=[];
+ for(let d=1;d<=60;d++)rank.push({d,score:cont[d]/50});
+ rank.sort((a,b)=>b.score-a.score||a.d-b.d);
+ return rank;
+}
+
+async function auditar(hist){
+ const global=criarAcc(),dev=criarAcc(),oos=criarAcc();
+ const eras=[];
+ let era=criarAcc(),ini=null,fim=null;
+
+ for(let t=INICIO;t<hist.length;t++){
+  const concurso=hist[t].concurso;
+  const rank=rankingF50(hist,t);
+  const real=hist[t].dezenas;
+  registrar(global,rank,real);
+  registrar(concurso<OOS?dev:oos,rank,real);
+
+  if(concurso>=OOS){
+   if(ini===null)ini=concurso;
+   fim=concurso;
+   registrar(era,rank,real);
+   if(era.n===150){
+    eras.push({ini,fim,acc:era});
+    era=criarAcc();
+    ini=null;
+   }
+  }
+
+  if((t-INICIO)%30===0||t===hist.length-1){
+   const pct=(t-INICIO+1)/(hist.length-INICIO);
+   document.getElementById("bar").style.width=(pct*100)+"%";
+   document.getElementById("status").textContent="Concurso "+concurso+" de 3066 — "+fmt(pct*100,1)+"%";
+   await new Promise(r=>setTimeout(r,0));
+  }
+ }
+ if(era.n)eras.push({ini,fim,acc:era});
+ return {global,dev,oos,eras};
+}
+
+function tabelaResumo(r){
+ let html='<section class="card"><h2>F50 — VALIDAÇÃO CRONOLÓGICA</h2><table><tr><th>Período</th><th>Testes</th><th>Top6</th><th>Top10</th><th>Top15</th><th>Top20</th><th>Z Top10</th></tr>';
+ for(const [nome,a] of [["Global 101–3066",r.global],["DEV 101–2176",r.dev],["OOS 2177–3066",r.oos]]){
+  const s=stats(a);
+  html+='<tr><td>'+nome+'</td><td>'+a.n+'</td>';
+  for(const k of KS)html+='<td>'+fmt(media(a,k))+'</td>';
+  html+='<td>'+fmt(s.z,2)+'</td></tr>';
+ }
+ html+='</table></section>';
+ return html;
+}
+
+function tabelaEras(r){
+ let html='<section class="card"><h2>F50 — ESTABILIDADE OOS POR BLOCOS</h2><p class="sub">Blocos cronológicos de 150 concursos, último bloco com 140. Sem seleção posterior de períodos.</p>';
+ html+='<table><tr><th>Bloco</th><th>Concursos</th><th>N</th><th>Top10</th><th>Δ</th><th>Z</th><th>IC 95%</th></tr>';
+ r.eras.forEach((b,i)=>{
+  const s=stats(b.acc);
+  const d=s.m-1;
+  html+='<tr><td>E'+(i+1)+'</td><td>'+b.ini+'–'+b.fim+'</td><td>'+b.acc.n+'</td><td>'+fmt(s.m)+'</td><td class="'+(d>0?"ok":d<0?"bad":"warn")+'">'+(d>=0?"+":"")+fmt(d)+'</td><td>'+fmt(s.z,2)+'</td><td>'+fmt(s.lo)+'–'+fmt(s.hi)+'</td></tr>';
+ });
+ return html+'</table></section>';
+}
+
+function tabelaDistribuicao(a){
+ let html='<section class="card"><h2>F50 — DISTRIBUIÇÃO DE ACERTOS TOP10 OOS</h2>';
+ html+='<table><tr><th>Acertos</th><th>Observado</th><th>Observado %</th><th>Esperado</th><th>Esperado %</th></tr>';
+ for(let x=0;x<=6;x++){
+  const p=prob(10,x);
+  html+='<tr><td>'+x+'</td><td>'+a.dist[x]+'</td><td>'+fmt(100*a.dist[x]/a.n,2)+'%</td><td>'+fmt(a.n*p,1)+'</td><td>'+fmt(100*p,2)+'%</td></tr>';
+ }
+ return html+'</table></section>';
+}
+
+function mostrar(r){
+ let html=tabelaResumo(r)+tabelaEras(r)+tabelaDistribuicao(r.oos);
+ const s=stats(r.oos);
+ const acima=s.lo>1;
+ html+='<section class="card"><h2>DIAGNÓSTICO FINAL — F50</h2>';
+ html+='<p>Média OOS Top10: <b>'+fmt(s.m,6)+'</b></p>';
+ html+='<p>Baseline: <b>1,000000</b></p>';
+ html+='<p>Erro-padrão: <b>'+fmt(s.ep,5)+'</b></p>';
+ html+='<p>Z-score: <b>'+fmt(s.z,3)+'</b></p>';
+ html+='<p>IC 95%: <b>'+fmt(s.lo,4)+' a '+fmt(s.hi,4)+'</b></p>';
+ html+='<p class="'+(acima?"ok":"warn")+'">'+
+  (acima?"F50 acima do baseline no teste nominal. Exige replicação independente.":"SEM EVIDÊNCIA ESTATÍSTICA DE VANTAGEM DO F50")+'</p>';
+ html+='<p class="sub">O F50 foi selecionado para esta auditoria após observar os resultados da V22. Portanto, qualquer significância nominal precisaria ser interpretada com correção para múltiplas comparações e validação futura independente.</p>';
+ html+='</section>';
+ document.getElementById("saida").innerHTML=html;
+ document.getElementById("saida").scrollIntoView({behavior:"smooth"});
+}
+
+async function iniciar(){
+ const btn=document.getElementById("btn");
+ btn.disabled=true;
+ document.getElementById("saida").innerHTML="";
+ try{
+  const hist=parseDados(document.getElementById("dados").value);
+  document.getElementById("status").textContent="Histórico validado. Executando auditoria...";
+  const r=await auditar(hist);
+  document.getElementById("status").textContent="Auditoria V23 concluída.";
+  mostrar(r);
+ }catch(err){
+  document.getElementById("status").textContent="ERRO: "+err.message;
+  alert(err.message);
+ }finally{
+  btn.disabled=false;
+ }
+}
+</script>
+</body>
+</html>
