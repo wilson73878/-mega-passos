@@ -1,0 +1,347 @@
+
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Mega Passos V20 — Etapa 11</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#07111f;color:#f4f7fb;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif}
+.container{max-width:1050px;margin:auto;padding:22px 16px 80px}
+h1{font-size:31px}
+h2{font-size:23px;margin-top:0}
+.sub{color:#aab6c9;line-height:1.6}
+.card{background:#152136;border-radius:22px;padding:21px;margin-top:20px;overflow-x:auto}
+textarea{width:100%;height:290px;background:#0b1628;color:white;border:2px solid #43516b;border-radius:15px;padding:14px;font-size:14px}
+button{width:100%;padding:18px;margin-top:16px;background:#86d292;color:#103b68;border:0;border-radius:16px;font-weight:800;font-size:19px}
+button:disabled{opacity:.5}
+table{border-collapse:collapse;width:100%;min-width:720px}
+th,td{padding:10px;border-bottom:1px solid #43516b;text-align:center;white-space:nowrap}
+th{color:#9bd5a3}
+.good{color:#86d292;font-weight:bold}
+.bad{color:#ff8989;font-weight:bold}
+.warn{color:#ffd06c;font-weight:bold}
+.progress{height:15px;background:#26354b;border-radius:9px;overflow:hidden;margin-top:15px}
+.bar{height:100%;width:0;background:#86d292}
+.metric{font-size:27px;font-weight:900}
+</style>
+</head>
+<body>
+<div class="container">
+
+<h1>MEGA PASSOS V20 — ETAPA 11</h1>
+<p class="sub">Auditoria do Hazard original, calibração e validação cronológica. Nenhum peso do M5 será otimizado.</p>
+
+<div class="card">
+<h2>Histórico 1–3066</h2>
+<p class="sub">Cole o mesmo histórico utilizado na V19. Não inclua 3067.</p>
+<textarea id="dados" placeholder="1 04 05 30 33 41 52
+2 ...
+3066 04 06 09 13 28 48"></textarea>
+<button id="btn" onclick="iniciar()">EXECUTAR V20 — AUDITORIA HAZARD</button>
+</div>
+
+<div id="status"></div>
+<div id="saida"></div>
+</div>
+
+<script>
+/* PARSER E VALIDAÇÃO */
+function parseDados(txt){
+ const arr=[];
+ for(const l of txt.trim().split(/\n+/)){
+  const n=l.trim().split(/\s+/).map(Number);
+  if(n.length!==7) continue;
+  const concurso=n[0], dezenas=n.slice(1,7);
+  if(!Number.isInteger(concurso)) continue;
+  if(dezenas.some(x=>!Number.isInteger(x)||x<1||x>60)) continue;
+  if(new Set(dezenas).size!==6) continue;
+  arr.push({concurso,dezenas});
+ }
+ arr.sort((a,b)=>a.concurso-b.concurso);
+ return arr;
+}
+
+function validar(hist){
+ if(hist.length!==3066) return "São necessários exatamente 3066 concursos. Reconhecidos: "+hist.length;
+ for(let i=0;i<hist.length;i++){
+  if(hist[i].concurso!==i+1)
+   return "Histórico incompleto, duplicado ou fora da sequência no concurso "+(i+1);
+ }
+ return "";
+}
+
+/* PASSO E HAZARD ORIGINAIS — V18/V19 */
+function passoAtual(hist,d){
+ for(let i=hist.length-1;i>=0;i--){
+  if(hist[i].dezenas.includes(d)) return hist.length-i;
+ }
+ return hist.length+1;
+}
+
+function gaps(hist,d){
+ let p=[];
+ hist.forEach((x,i)=>{
+  if(x.dezenas.includes(d)) p.push(i);
+ });
+ let g=[];
+ for(let i=1;i<p.length;i++) g.push(p[i]-p[i-1]);
+ return g;
+}
+
+function hazard(hist,d){
+ const p=passoAtual(hist,d);
+ const gs=gaps(hist,d);
+ if(!gs.length) return .10;
+ let chegou=0,saiu=0;
+ for(const g of gs){
+  if(g>=p) chegou++;
+  if(g===p) saiu++;
+ }
+ return (saiu+1)/(chegou+10);
+}
+
+/* ACUMULADORES */
+function acc(){
+ return {n:0,ac:0,somaH:0,somaH2:0,brier:0,baseBrier:0};
+}
+
+function add(a,h,y){
+ a.n++;
+ a.ac+=y;
+ a.somaH+=h;
+ a.somaH2+=h*h;
+ a.brier+=(h-y)**2;
+ a.baseBrier+=(.10-y)**2;
+}
+
+function taxa(a){return a.n?a.ac/a.n:0}
+function mediaH(a){return a.n?a.somaH/a.n:0}
+function brier(a){return a.n?a.brier/a.n:0}
+function brierBase(a){return a.n?a.baseBrier/a.n:0}
+function fmt(x,n=4){return Number(x).toFixed(n)}
+function pct(x){return fmt(x*100,2)+"%"}
+function corDelta(x){return x>0?"good":x<0?"bad":"warn"}
+
+/*
+Para cada concurso:
+- estado conhecido até t-1
+- 60 valores Hazard
+- resultado real de t somente após calcular
+  todos os valores.
+*/
+async function gerar(hist){
+ const registros=[];
+ const inicio=100;
+ for(let t=inicio;t<hist.length;t++){
+  const passado=hist.slice(0,t);
+  const real=new Set(hist[t].dezenas);
+  const linha=[];
+  for(let d=1;d<=60;d++){
+   const h=hazard(passado,d);
+   linha.push({d,h,y:real.has(d)?1:0});
+  }
+  registros.push({concurso:hist[t].concurso,linha});
+  if((t-inicio)%20===0){
+   const p=(t-inicio+1)/(hist.length-inicio);
+   document.getElementById("bar").style.width=(p*100)+"%";
+   document.getElementById("ptxt").textContent=
+    "Auditando concurso "+hist[t].concurso+" de 3066";
+   await new Promise(r=>setTimeout(r,0));
+  }
+ }
+ return registros;
+}
+
+/*
+Cortes do Hazard definidos exclusivamente
+no desenvolvimento. Quantis por observação
+de dezena, não por concurso.
+*/
+function quantilOrdenado(a,q){
+ const pos=(a.length-1)*q;
+ const i=Math.floor(pos);
+ return a[i]+(a[Math.min(i+1,a.length-1)]-a[i])*(pos-i);
+}
+
+function limitesDev(dev){
+ const a=[];
+ for(const r of dev) for(const x of r.linha) a.push(x.h);
+ a.sort((x,y)=>x-y);
+ return [
+  quantilOrdenado(a,.20),
+  quantilOrdenado(a,.40),
+  quantilOrdenado(a,.60),
+  quantilOrdenado(a,.80)
+ ];
+}
+
+function classe(h,lim){
+ for(let i=0;i<lim.length;i++) if(h<=lim[i]) return i;
+ return 4;
+}
+
+function analisar(registros,lim){
+ const global=acc();
+ const faixas=Array.from({length:5},acc);
+ const decimos=Array.from({length:10},acc);
+ const top={6:acc(),10:acc(),15:acc(),20:acc()};
+ const eras=[];
+ let era=acc(), inicioEra=null, fimEra=null;
+
+ for(const r of registros){
+  if(inicioEra===null) inicioEra=r.concurso;
+  fimEra=r.concurso;
+
+  for(const x of r.linha){
+   add(global,x.h,x.y);
+   add(era,x.h,x.y);
+   add(faixas[classe(x.h,lim)],x.h,x.y);
+   const c=Math.min(9,Math.floor(x.h*10));
+   add(decimos[c],x.h,x.y);
+  }
+
+  const rank=[...r.linha].sort((a,b)=>b.h-a.h||a.d-b.d);
+  for(const k of [6,10,15,20]){
+   const selecionados=rank.slice(0,k);
+   for(const x of selecionados) add(top[k],x.h,x.y);
+  }
+
+  if((r.concurso-inicioEra+1)>=250){
+   eras.push({inicio:inicioEra,fim:fimEra,a:era});
+   era=acc();inicioEra=null;
+  }
+ }
+ if(era.n) eras.push({inicio:inicioEra,fim:fimEra,a:era});
+ return {global,faixas,decimos,top,eras};
+}
+
+function tabelaFaixas(a){
+ let s="<table><tr><th>Faixa</th><th>Observações</th><th>Hazard médio</th><th>Ocorrência real</th><th>Diferença</th></tr>";
+ a.forEach((x,i)=>{
+  const dif=taxa(x)-mediaH(x);
+  s+=`<tr><td>F${i+1}</td><td>${x.n}</td><td>${pct(mediaH(x))}</td><td>${pct(taxa(x))}</td><td class="${corDelta(dif)}">${pct(dif)}</td></tr>`;
+ });
+ return s+"</table>";
+}
+
+function tabelaDecimos(a){
+ let s="<table><tr><th>Hazard declarado</th><th>N</th><th>Hazard médio</th><th>Ocorrência real</th></tr>";
+ a.forEach((x,i)=>{
+  s+=`<tr><td>${i*10}–${(i+1)*10}%</td><td>${x.n}</td><td>${pct(mediaH(x))}</td><td>${pct(taxa(x))}</td></tr>`;
+ });
+ return s+"</table>";
+}
+
+function tabelaTop(a){
+ let s="<table><tr><th>Seleção</th><th>Ocorrência real</th><th>Baseline</th><th>Hazard médio</th><th>Δ real</th></tr>";
+ for(const k of [6,10,15,20]){
+  const x=a[k],delta=taxa(x)-.10;
+  s+=`<tr><td>Top${k}</td><td>${pct(taxa(x))}</td><td>10,00%</td><td>${pct(mediaH(x))}</td><td class="${corDelta(delta)}">${pct(delta)}</td></tr>`;
+ }
+ return s+"</table><p class='sub'>A ocorrência real nesta tabela é por dezena selecionada, não o número médio de acertos por concurso. Para converter: multiplique a taxa pelo tamanho do TopK.</p>";
+}
+
+function mostrar(dev,val,lim,ad,av){
+ const bd=brier(ad.global),bv=brier(av.global);
+ const rd=1-bd/brierBase(ad.global);
+ const rv=1-bv/brierBase(av.global);
+
+ let html=`
+ <div class="card">
+ <h2>ETAPA 11 — AUDITORIA CONCLUÍDA</h2>
+ <p>Desenvolvimento: <b>${dev[0].concurso}–${dev.at(-1).concurso}</b> (${dev.length} concursos)</p>
+ <p>Validação OOS: <b>${val[0].concurso}–${val.at(-1).concurso}</b> (${val.length} concursos)</p>
+ <p class="sub">Cada concurso gera 60 observações. O sorteio-alvo não entra no cálculo do Hazard.</p>
+ </div>
+
+ <div class="card">
+ <h2>HAZARD — CALIBRAÇÃO GLOBAL</h2>
+ <table>
+ <tr><th>Amostra</th><th>N dezenas</th><th>Hazard médio</th><th>Ocorrência real</th><th>Brier Hazard</th><th>Brier aleatório</th><th>Skill</th></tr>
+ <tr><td>DEV</td><td>${ad.global.n}</td><td>${pct(mediaH(ad.global))}</td><td>${pct(taxa(ad.global))}</td><td>${fmt(bd,6)}</td><td>${fmt(brierBase(ad.global),6)}</td><td class="${corDelta(rd)}">${fmt(rd,4)}</td></tr>
+ <tr><td>OOS</td><td>${av.global.n}</td><td>${pct(mediaH(av.global))}</td><td>${pct(taxa(av.global))}</td><td>${fmt(bv,6)}</td><td>${fmt(brierBase(av.global),6)}</td><td class="${corDelta(rv)}">${fmt(rv,4)}</td></tr>
+ </table>
+ <p class="sub">Skill positivo significa Brier menor que o baseline fixo de 10%. Skill negativo significa pior desempenho. O Hazard original é tratado aqui como previsão numérica para testar sua calibração, não como probabilidade já validada.</p>
+ </div>
+
+ <div class="card">
+ <h2>QUINTIS — LIMITES CONGELADOS NO DEV</h2>
+ <p class="sub">Cortes: ${lim.map(x=>pct(x)).join(" | ")}</p>
+ <h3>Desenvolvimento</h3>${tabelaFaixas(ad.faixas)}
+ <h3>Validação OOS</h3>${tabelaFaixas(av.faixas)}
+ </div>
+
+ <div class="card">
+ <h2>CALIBRAÇÃO POR INTERVALO DE HAZARD — OOS</h2>
+ ${tabelaDecimos(av.decimos)}
+ </div>
+
+ <div class="card">
+ <h2>ORDENAÇÃO PELO HAZARD — DEV</h2>
+ ${tabelaTop(ad.top)}
+ </div>
+
+ <div class="card">
+ <h2>ORDENAÇÃO PELO HAZARD — OOS</h2>
+ ${tabelaTop(av.top)}
+ </div>
+
+ <div class="card">
+ <h2>ESTABILIDADE TEMPORAL — OOS</h2>
+ <table><tr><th>Concursos</th><th>N observações</th><th>Hazard médio</th><th>Ocorrência real</th><th>Skill Brier</th></tr>`;
+
+ for(const e of av.eras){
+  const skill=1-brier(e.a)/brierBase(e.a);
+  html+=`<tr><td>${e.inicio}–${e.fim}</td><td>${e.a.n}</td><td>${pct(mediaH(e.a))}</td><td>${pct(taxa(e.a))}</td><td class="${corDelta(skill)}">${fmt(skill,4)}</td></tr>`;
+ }
+
+ html+=`</table></div>
+ <div class="card">
+ <h2>DIAGNÓSTICO EXPERIMENTAL</h2>
+ <div class="metric">${rv>0?"SKILL OOS POSITIVO":"SEM GANHO DE BRIER OOS"}</div>
+ <p class="sub">Um skill positivo isolado não comprova previsão superior. Avaliaremos também calibração, estabilidade, magnitude e incerteza estatística. A análise de dezenas de um mesmo concurso possui dependência; não devemos tratar as 60 observações como 60 sorteios independentes.</p>
+ <p class="sub"><b>O M5 não foi modificado. O concurso 3067 continua excluído.</b></p>
+ </div>`;
+
+ document.getElementById("saida").innerHTML=html;
+ document.getElementById("saida").scrollIntoView({behavior:"smooth"});
+}
+
+async function iniciar(){
+ const btn=document.getElementById("btn");
+ btn.disabled=true;
+ document.getElementById("saida").innerHTML="";
+
+ try{
+  const hist=parseDados(document.getElementById("dados").value);
+  const erro=validar(hist);
+  if(erro){alert(erro);return;}
+
+  document.getElementById("status").innerHTML=`
+   <div class="card">
+   <h2>PROCESSANDO V20...</h2>
+   <p id="ptxt" class="sub">Preparando auditoria.</p>
+   <div class="progress"><div id="bar" class="bar"></div></div>
+   </div>`;
+
+  const registros=await gerar(hist);
+  const corte=Math.floor(registros.length*.70);
+  const dev=registros.slice(0,corte);
+  const val=registros.slice(corte);
+  const lim=limitesDev(dev);
+  const ad=analisar(dev,lim);
+  const av=analisar(val,lim);
+
+  document.getElementById("bar").style.width="100%";
+  mostrar(dev,val,lim,ad,av);
+ }catch(e){
+  alert("Erro durante a auditoria: "+e.message);
+ }finally{
+  btn.disabled=false;
+ }
+}
+</script>
+</body>
+</html>
