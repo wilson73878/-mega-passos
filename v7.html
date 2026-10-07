@@ -1,0 +1,636 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<title>Mega Passos V7</title>
+
+<style>
+body{
+    font-family:Arial,sans-serif;
+    background:#07111f;
+    color:white;
+    margin:0;
+    padding:18px;
+}
+
+.container{
+    max-width:900px;
+    margin:auto;
+}
+
+h1{
+    font-size:34px;
+}
+
+h2{
+    margin-top:38px;
+    font-size:30px;
+}
+
+.card{
+    background:#131f31;
+    padding:22px;
+    border-radius:20px;
+    margin-top:20px;
+}
+
+textarea{
+    width:100%;
+    height:300px;
+    background:#0d1726;
+    color:white;
+    border:2px solid #40506a;
+    border-radius:16px;
+    padding:14px;
+    font-size:16px;
+    box-sizing:border-box;
+}
+
+button{
+    width:100%;
+    margin-top:20px;
+    padding:24px;
+    border:none;
+    border-radius:20px;
+    background:#83cf91;
+    color:#2865e8;
+    font-size:24px;
+    font-weight:bold;
+}
+
+.bolas{
+    display:grid;
+    grid-template-columns:repeat(5,1fr);
+    gap:14px;
+    margin-top:22px;
+}
+
+.bola{
+    aspect-ratio:1;
+    background:#83cf91;
+    color:#06101d;
+    border-radius:50%;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    font-size:28px;
+    font-weight:bold;
+}
+
+table{
+    width:100%;
+    border-collapse:collapse;
+    margin-top:18px;
+    font-size:15px;
+}
+
+th,td{
+    padding:11px 6px;
+    border-bottom:1px solid #40506a;
+    text-align:center;
+}
+
+th{
+    color:#9bd6a4;
+}
+
+.verde{
+    color:#83cf91;
+    font-weight:bold;
+}
+
+.amarelo{
+    color:#ffd166;
+    font-weight:bold;
+}
+
+.vermelho{
+    color:#ff8585;
+    font-weight:bold;
+}
+
+.info{
+    color:#b7c0d0;
+    line-height:1.55;
+}
+
+@media(max-width:600px){
+    h1{font-size:29px}
+    .bola{font-size:24px}
+    table{font-size:13px}
+}
+</style>
+</head>
+
+<body>
+
+<div class="container">
+
+<h1>MEGA PASSOS V7</h1>
+
+<div class="card">
+
+<p class="info">
+V7 = Passo Condicional + Regime de Passo.
+O regime é calculado exclusivamente a partir do histórico
+anterior ao concurso alvo.
+</p>
+
+<textarea id="historico"
+placeholder="Cole o histórico:
+
+3066 04 06 09 13 28 48
+3065 08 10 30 38 50 53
+..."></textarea>
+
+<button onclick="analisar()">
+ANALISAR PASSOS V7
+</button>
+
+</div>
+
+<div id="resultado"></div>
+
+</div>
+
+<script>
+
+function parseHistorico(txt){
+
+    let linhas=txt.trim().split(/\n+/);
+    let concursos=[];
+
+    for(let linha of linhas){
+
+        let nums=linha.trim().split(/\s+/).map(Number);
+
+        if(nums.length<7) continue;
+
+        let concurso=nums[0];
+        let dezenas=nums.slice(1,7);
+
+        if(
+            Number.isFinite(concurso) &&
+            dezenas.length===6 &&
+            dezenas.every(n=>n>=1 && n<=60) &&
+            new Set(dezenas).size===6
+        ){
+            concursos.push({
+                concurso:concurso,
+                dezenas:dezenas
+            });
+        }
+    }
+
+    concursos.sort((a,b)=>a.concurso-b.concurso);
+
+    return concursos;
+}
+
+function faixaPasso(p){
+
+    if(p<=3) return "1–3";
+    if(p<=6) return "4–6";
+    if(p<=10) return "7–10";
+    if(p<=15) return "11–15";
+
+    return "16+";
+}
+
+/*
+Calcula o passo atual de cada dezena no instante
+imediatamente posterior ao último concurso do histórico.
+*/
+
+function passosAtuais(hist){
+
+    let ultima={};
+
+    for(let n=1;n<=60;n++){
+        ultima[n]=-1;
+    }
+
+    hist.forEach((c,i)=>{
+        c.dezenas.forEach(n=>{
+            ultima[n]=i;
+        });
+    });
+
+    let passos={};
+
+    for(let n=1;n<=60;n++){
+
+        if(ultima[n]===-1){
+            passos[n]=hist.length;
+        }else{
+            passos[n]=hist.length-ultima[n];
+        }
+    }
+
+    return passos;
+}
+
+/*
+Taxas históricas das faixas.
+
+Para cada concurso t:
+1. usa somente concursos anteriores a t;
+2. calcula o passo que cada dezena possuía;
+3. registra sua faixa;
+4. verifica se saiu em t.
+
+Isto evita olhar o futuro.
+*/
+
+function aprenderRegimes(hist){
+
+    let faixas=["1–3","4–6","7–10","11–15","16+"];
+
+    let dados={};
+
+    faixas.forEach(f=>{
+        dados[f]={n:0,acertos:0};
+    });
+
+    /*
+    Precisamos de histórico mínimo antes de começar
+    a aprender os regimes.
+    */
+
+    let inicio=Math.min(30,hist.length);
+
+    for(let t=inicio;t<hist.length;t++){
+
+        let anterior=hist.slice(0,t);
+
+        let passos=passosAtuais(anterior);
+
+        let sorteadas=new Set(hist[t].dezenas);
+
+        for(let n=1;n<=60;n++){
+
+            let f=faixaPasso(passos[n]);
+
+            dados[f].n++;
+
+            if(sorteadas.has(n)){
+                dados[f].acertos++;
+            }
+        }
+    }
+
+    /*
+    Suavização Beta.
+
+    Baseline individual Mega-Sena:
+    6 / 60 = 10%.
+
+    Prior equivalente a 20 observações:
+    alpha=2
+    beta=18
+    */
+
+    faixas.forEach(f=>{
+
+        let d=dados[f];
+
+        d.taxaBruta =
+            d.n ?
+            d.acertos/d.n :
+            0.10;
+
+        d.taxaAjustada =
+            (d.acertos+2) /
+            (d.n+20);
+
+        d.lift =
+            d.taxaAjustada/0.10;
+    });
+
+    return dados;
+}
+
+/*
+Score individual condicional da dezena.
+
+Usamos seu próprio histórico de passos para medir
+quantas vezes ela chegou ao passo atual e quantas
+vezes saiu exatamente nesse passo.
+*/
+
+function scoreIndividual(hist,dezena,passoAtual){
+
+    let aparicoes=[];
+
+    hist.forEach((c,i)=>{
+        if(c.dezenas.includes(dezena)){
+            aparicoes.push(i);
+        }
+    });
+
+    let passos=[];
+
+    for(let i=1;i<aparicoes.length;i++){
+        passos.push(
+            aparicoes[i]-aparicoes[i-1]
+        );
+    }
+
+    let oportunidades=0;
+    let saidas=0;
+
+    for(let p of passos){
+
+        if(p>=passoAtual){
+            oportunidades++;
+        }
+
+        if(p===passoAtual){
+            saidas++;
+        }
+    }
+
+    /*
+    suavização individual
+    */
+
+    let taxa=
+        (saidas+1) /
+        (oportunidades+10);
+
+    return {
+        oportunidades,
+        saidas,
+        taxa
+    };
+}
+
+function analisar(){
+
+    let hist=parseHistorico(
+        document.getElementById("historico").value
+    );
+
+    let out=document.getElementById("resultado");
+
+    if(hist.length<35){
+
+        out.innerHTML=
+        '<div class="card">'+
+        '<b>Histórico insuficiente.</b><br>'+
+        'Use pelo menos 35 concursos.'+
+        '</div>';
+
+        return;
+    }
+
+    let passos=passosAtuais(hist);
+
+    let regimes=aprenderRegimes(hist);
+
+    let ranking=[];
+
+    for(let n=1;n<=60;n++){
+
+        let passo=passos[n];
+
+        let faixa=faixaPasso(passo);
+
+        let individual=
+            scoreIndividual(
+                hist,
+                n,
+                passo
+            );
+
+        let regime=regimes[faixa];
+
+        /*
+        V7:
+
+        combinação geométrica entre:
+
+        taxa individual suavizada
+        e
+        taxa da faixa suavizada.
+
+        A raiz quadrada impede que uma única
+        componente domine completamente.
+        */
+
+        let score=
+            Math.sqrt(
+                individual.taxa *
+                regime.taxaAjustada
+            );
+
+        ranking.push({
+            dez:n,
+            passo,
+            faixa,
+            individual,
+            regime,
+            score
+        });
+    }
+
+    ranking.sort((a,b)=>
+        b.score-a.score ||
+        b.regime.lift-a.regime.lift ||
+        a.dez-b.dez
+    );
+
+    let alvo=
+        hist[hist.length-1].concurso+1;
+
+    let html='';
+
+    html+=`
+    <div class="card">
+    <h2>ANÁLISE V7 CONCLUÍDA</h2>
+
+    ${hist.length} concursos reconhecidos.<br>
+
+    Intervalo:
+    <b>${hist[0].concurso}</b>
+    até
+    <b>${hist[hist.length-1].concurso}</b><br>
+
+    Concurso alvo:
+    <b>${alvo}</b>
+    </div>
+    `;
+
+    html+=`
+    <h2>TOP 10 — REGIME V7</h2>
+    <div class="bolas">
+    `;
+
+    ranking.slice(0,10).forEach(r=>{
+
+        html+=`
+        <div class="bola">
+        ${String(r.dez).padStart(2,"0")}
+        </div>
+        `;
+    });
+
+    html+='</div>';
+
+    /*
+    tabela dos regimes
+    */
+
+    html+=`
+    <div class="card">
+
+    <h2>REGIMES APRENDIDOS</h2>
+
+    <p class="info">
+    Lift 1,00× corresponde ao baseline de 10%.
+    Valores acima de 1 indicam desempenho histórico
+    superior ao baseline; abaixo de 1 indicam desempenho
+    inferior.
+    </p>
+
+    <table>
+
+    <tr>
+    <th>Passo</th>
+    <th>N</th>
+    <th>Acertos</th>
+    <th>Taxa</th>
+    <th>Taxa Ajust.</th>
+    <th>Lift</th>
+    </tr>
+    `;
+
+    for(let f of ["1–3","4–6","7–10","11–15","16+"]){
+
+        let d=regimes[f];
+
+        let classe=
+            d.lift>1.05 ?
+            "verde" :
+            d.lift<0.95 ?
+            "vermelho" :
+            "amarelo";
+
+        html+=`
+        <tr>
+        <td><b>${f}</b></td>
+        <td>${d.n}</td>
+        <td>${d.acertos}</td>
+        <td>${(100*d.taxaBruta).toFixed(1)}%</td>
+        <td>${(100*d.taxaAjustada).toFixed(1)}%</td>
+        <td class="${classe}">
+        ${d.lift.toFixed(2)}×
+        </td>
+        </tr>
+        `;
+    }
+
+    html+=`
+    </table>
+    </div>
+    `;
+
+    /*
+    ranking completo
+    */
+
+    html+=`
+    <div class="card">
+
+    <h2>RANKING DAS 60 DEZENAS</h2>
+
+    <p class="info">
+    O ranking combina a taxa condicional individual
+    da dezena com o comportamento histórico da faixa
+    de passo em que ela se encontra.
+    </p>
+
+    <table>
+
+    <tr>
+    <th>#</th>
+    <th>Dez</th>
+    <th>Passo</th>
+    <th>Faixa</th>
+    <th>Chegou</th>
+    <th>Saiu</th>
+    <th>Ind.</th>
+    <th>Lift</th>
+    <th>Score</th>
+    </tr>
+    `;
+
+    ranking.forEach((r,i)=>{
+
+        html+=`
+        <tr>
+
+        <td>${i+1}</td>
+
+        <td class="verde">
+        ${String(r.dez).padStart(2,"0")}
+        </td>
+
+        <td>${r.passo}</td>
+
+        <td>${r.faixa}</td>
+
+        <td>
+        ${r.individual.oportunidades}
+        </td>
+
+        <td>
+        ${r.individual.saidas}
+        </td>
+
+        <td>
+        ${(100*r.individual.taxa).toFixed(1)}%
+        </td>
+
+        <td>
+        ${r.regime.lift.toFixed(2)}×
+        </td>
+
+        <td>
+        ${r.score.toFixed(4)}
+        </td>
+
+        </tr>
+        `;
+    });
+
+    html+=`
+    </table>
+    </div>
+    `;
+
+    html+=`
+    <div class="card">
+
+    <b>Importante</b>
+
+    <p class="info">
+    A V7 é um modelo estatístico experimental.
+    Passos históricos não alteram a probabilidade física
+    de uma dezena em um sorteio independente.
+    A utilidade do modelo somente poderá ser avaliada
+    pelo backtest walk-forward da V7.
+    </p>
+
+    </div>
+    `;
+
+    out.innerHTML=html;
+}
+
+</script>
+
+</body>
+</html>
