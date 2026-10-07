@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Mega Passos V2</title>
+
+<style>
+body{
+  font-family:Arial,sans-serif;
+  background:#07111f;
+  color:#fff;
+  margin:0;
+  padding:18px;
+}
+.container{max-width:1000px;margin:auto}
+h1{margin-bottom:5px}
+.sub{color:#aeb9c9;margin-bottom:20px}
+textarea{
+  width:100%;height:300px;box-sizing:border-box;
+  background:#111d2e;color:#fff;border:2px solid #43516a;
+  border-radius:14px;padding:14px;font-size:17px;
+}
+button{
+  width:100%;padding:18px;margin-top:15px;
+  background:#65cf88;border:0;border-radius:14px;
+  font-size:21px;font-weight:bold;
+}
+.card{
+  background:#111d2e;border-radius:15px;
+  padding:16px;margin-top:18px;
+}
+.bolas{display:flex;flex-wrap:wrap;gap:10px}
+.bola{
+  background:#65cf88;color:#04130a;
+  width:62px;height:62px;border-radius:50%;
+  display:flex;align-items:center;justify-content:center;
+  font-size:22px;font-weight:bold;
+}
+table{
+  width:100%;border-collapse:collapse;
+  font-size:14px;margin-top:12px;
+}
+th,td{
+  padding:9px 5px;border-bottom:1px solid #334156;
+  text-align:center;
+}
+th{color:#9fe2b4}
+.scroll{overflow-x:auto}
+.destaque{color:#65cf88;font-weight:bold}
+.small{font-size:13px;color:#aeb9c9}
+</style>
+</head>
+
+<body>
+<div class="container">
+
+<h1>MEGA PASSOS V2</h1>
+<div class="sub">
+Análise estatística dos intervalos entre aparições das dezenas
+</div>
+
+<textarea id="historico"
+placeholder="Cole o histórico:
+3067 01 04 17 33 41 52
+3066 04 06 09 13 28 48
+..."></textarea>
+
+<button onclick="analisar()">ANALISAR PASSOS</button>
+
+<div id="status" class="card">Aguardando dados...</div>
+
+<div id="top" style="display:none">
+<h2>TOP 10 — PASSOS V2</h2>
+<div id="bolas" class="bolas"></div>
+</div>
+
+<div id="detalhes" style="display:none" class="card">
+<h2>Ranking das 60 dezenas</h2>
+<div class="small">
+Score experimental baseado no comportamento histórico dos passos.
+Não representa garantia de resultado futuro.
+</div>
+
+<div class="scroll">
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Dez</th>
+<th>Atual</th>
+<th>Média</th>
+<th>Mediana</th>
+<th>Moda</th>
+<th>Mín</th>
+<th>Máx</th>
+<th>Igual</th>
+<th>F25</th>
+<th>F50</th>
+<th>Score</th>
+</tr>
+</thead>
+<tbody id="tabela"></tbody>
+</table>
+</div>
+</div>
+
+</div>
+
+<script>
+
+function mediana(a){
+ if(!a.length)return 0;
+ const x=[...a].sort((a,b)=>a-b);
+ const m=Math.floor(x.length/2);
+ return x.length%2 ? x[m] : (x[m-1]+x[m])/2;
+}
+
+function moda(a){
+ if(!a.length)return 0;
+ const f={};
+ let melhor=0,quant=0;
+ a.forEach(v=>{
+   f[v]=(f[v]||0)+1;
+   if(f[v]>quant){
+     quant=f[v];
+     melhor=v;
+   }
+ });
+ return melhor;
+}
+
+function analisar(){
+
+ const linhas=document.getElementById("historico").value
+ .trim().split(/\n+/);
+
+ let concursos=[];
+
+ linhas.forEach(l=>{
+   const n=l.trim().split(/\s+/).map(Number);
+
+   if(n.length>=7){
+     const concurso=n[0];
+     const dezenas=n.slice(1,7);
+
+     if(
+       Number.isInteger(concurso) &&
+       dezenas.every(x=>x>=1 && x<=60) &&
+       new Set(dezenas).size===6
+     ){
+       concursos.push({concurso,dezenas});
+     }
+   }
+ });
+
+ if(concursos.length<10){
+   document.getElementById("status").innerHTML=
+   "Histórico insuficiente ou formato inválido.";
+   return;
+ }
+
+ concursos.sort((a,b)=>a.concurso-b.concurso);
+
+ const primeiro=concursos[0].concurso;
+ const ultimo=concursos[concursos.length-1].concurso;
+
+ let ranking=[];
+
+ for(let dez=1;dez<=60;dez++){
+
+   let aparicoes=[];
+
+   concursos.forEach((c,i)=>{
+     if(c.dezenas.includes(dez)) aparicoes.push(i);
+   });
+
+   let passos=[];
+
+   for(let i=1;i<aparicoes.length;i++){
+     passos.push(aparicoes[i]-aparicoes[i-1]);
+   }
+
+   let atual;
+
+   if(aparicoes.length){
+     atual=(concursos.length-1-aparicoes[aparicoes.length-1])+1;
+   }else{
+     atual=concursos.length;
+   }
+
+   const media=passos.length
+     ? passos.reduce((a,b)=>a+b,0)/passos.length
+     : 0;
+
+   const med=mediana(passos);
+   const mod=moda(passos);
+
+   const minimo=passos.length ? Math.min(...passos) : 0;
+   const maximo=passos.length ? Math.max(...passos) : 0;
+
+   const iguais=passos.filter(p=>p===atual).length;
+
+   const ult25=concursos.slice(-25)
+     .filter(c=>c.dezenas.includes(dez)).length;
+
+   const ult50=concursos.slice(-50)
+     .filter(c=>c.dezenas.includes(dez)).length;
+
+   /*
+     SCORE V2
+
+     35% proximidade da média
+     20% proximidade da mediana
+     15% coincidência com moda
+     15% frequência 25
+     10% frequência 50
+      5% recorrência histórica do passo atual
+   */
+
+   const sMedia=media
+     ? 100/(1+Math.abs(atual-media))
+     : 0;
+
+   const sMed=med
+     ? 100/(1+Math.abs(atual-med))
+     : 0;
+
+   const sModa=(atual===mod && mod>0) ? 100 : 0;
+
+   const s25=Math.min(100,(ult25/2.5)*25);
+   const s50=Math.min(100,(ult50/5)*25);
+
+   const sIgual=Math.min(100,iguais*20);
+
+   const score=
+       sMedia*0.35+
+       sMed*0.20+
+       sModa*0.15+
+       s25*0.15+
+       s50*0.10+
+       sIgual*0.05;
+
+   ranking.push({
+     dez,atual,media,med,mod,
+     minimo,maximo,iguais,
+     ult25,ult50,score,
+     passos
+   });
+ }
+
+ ranking.sort((a,b)=>b.score-a.score);
+
+ document.getElementById("status").innerHTML=
+ `<b>ANÁLISE V2 CONCLUÍDA</b><br>
+ ${concursos.length} concursos reconhecidos.<br>
+ Intervalo: ${primeiro} até ${ultimo}<br>
+ Concurso alvo: ${ultimo+1}`;
+
+ const bolas=document.getElementById("bolas");
+ bolas.innerHTML="";
+
+ ranking.slice(0,10).forEach(r=>{
+   const b=document.createElement("div");
+   b.className="bola";
+   b.textContent=String(r.dez).padStart(2,"0");
+   bolas.appendChild(b);
+ });
+
+ const tabela=document.getElementById("tabela");
+ tabela.innerHTML="";
+
+ ranking.forEach((r,i)=>{
+
+   const tr=document.createElement("tr");
+
+   tr.innerHTML=`
+   <td>${i+1}</td>
+   <td class="destaque">${String(r.dez).padStart(2,"0")}</td>
+   <td>${r.atual}</td>
+   <td>${r.media.toFixed(2)}</td>
+   <td>${r.med}</td>
+   <td>${r.mod}</td>
+   <td>${r.minimo}</td>
+   <td>${r.maximo}</td>
+   <td>${r.iguais}</td>
+   <td>${r.ult25}</td>
+   <td>${r.ult50}</td>
+   <td>${r.score.toFixed(1)}</td>
+   `;
+
+   tabela.appendChild(tr);
+ });
+
+ document.getElementById("top").style.display="block";
+ document.getElementById("detalhes").style.display="block";
+}
+
+</script>
+</body>
+</html>
