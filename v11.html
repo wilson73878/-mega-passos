@@ -1,0 +1,587 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Mega Passos V11</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#07111f;color:#f4f7fb;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif}
+.container{max-width:950px;margin:auto;padding:24px 18px 80px}
+h1{font-size:34px;margin-bottom:8px}
+h2{font-size:26px;margin-top:0}
+.sub{color:#aab6c9;line-height:1.55}
+.card{background:#152136;border-radius:24px;padding:24px;margin-top:22px;overflow:auto}
+textarea{width:100%;height:270px;background:#0b1628;color:white;border:2px solid #43516b;border-radius:18px;padding:16px;font-size:16px}
+button{width:100%;margin-top:18px;padding:20px;border:0;border-radius:20px;background:#86d292;color:#1264ef;font-weight:800;font-size:21px}
+button:disabled{opacity:.55}
+table{width:100%;border-collapse:collapse;min-width:720px}
+th,td{padding:11px 8px;border-bottom:1px solid #43516b;text-align:center;white-space:nowrap}
+th{color:#9bd5a3}
+.good{color:#86d292;font-weight:800}
+.bad{color:#ff8989;font-weight:800}
+.warn{color:#ffd06c;font-weight:800}
+.best{color:#86d292;font-weight:900}
+.metric{font-size:30px;font-weight:800}
+.progress{height:17px;background:#26354b;border-radius:10px;overflow:hidden;margin-top:14px}
+.bar{height:100%;width:0;background:#86d292}
+</style>
+</head>
+<body>
+<div class="container">
+
+<h1>MEGA PASSOS V11</h1>
+<p class="sub">
+Etapa 1 — teste incremental de frequências e atraso.
+O M5 original permanece congelado como benchmark.
+</p>
+
+<div class="card">
+<h2>Histórico</h2>
+<p class="sub">
+Nesta auditoria utilize somente o mesmo histórico da V10:
+<b>2918 até 3066</b>. Não inclua 3067.
+</p>
+
+<textarea id="dados" placeholder="3066 04 06 09 13 28 48
+3065 08 10 30 38 50 53
+..."></textarea>
+
+<button id="btn" onclick="iniciar()">EXECUTAR V11 — ETAPA 1</button>
+</div>
+
+<div id="status"></div>
+<div id="saida"></div>
+
+</div>
+
+<script>
+
+function parseDados(txt){
+ let arr=[];
+ for(const l of txt.trim().split(/\n+/)){
+   const n=l.trim().split(/\s+/).map(Number);
+   if(n.length<7) continue;
+   const concurso=n[0], dezenas=n.slice(1,7);
+   if(!Number.isInteger(concurso)) continue;
+   if(new Set(dezenas).size!==6) continue;
+   if(dezenas.some(x=>x<1||x>60)) continue;
+   arr.push({concurso,dezenas});
+ }
+ arr.sort((a,b)=>a.concurso-b.concurso);
+ return arr;
+}
+
+function media(a){
+ return a.length?a.reduce((s,x)=>s+x,0)/a.length:0;
+}
+
+function desvio(a){
+ if(a.length<2)return 0;
+ const m=media(a);
+ return Math.sqrt(a.reduce((s,x)=>s+(x-m)**2,0)/a.length);
+}
+
+function passoAtual(hist,d){
+ for(let i=hist.length-1;i>=0;i--)
+   if(hist[i].dezenas.includes(d)) return hist.length-i;
+ return hist.length+1;
+}
+
+function freq(hist,d,n){
+ const h=n>=hist.length?hist:hist.slice(-n);
+ if(!h.length)return 0;
+ let c=0;
+ for(const x of h) if(x.dezenas.includes(d))c++;
+ return c/h.length;
+}
+
+function gaps(hist,d){
+ let p=[];
+ hist.forEach((x,i)=>{
+   if(x.dezenas.includes(d))p.push(i);
+ });
+ let g=[];
+ for(let i=1;i<p.length;i++)g.push(p[i]-p[i-1]);
+ return g;
+}
+
+function hazard(hist,d){
+ const p=passoAtual(hist,d);
+ const gs=gaps(hist,d);
+ if(!gs.length)return .10;
+
+ let chegou=0,saiu=0;
+ for(const g of gs){
+   if(g>=p)chegou++;
+   if(g===p)saiu++;
+ }
+ return (saiu+1)/(chegou+10);
+}
+
+function faixa(p){
+ if(p<=3)return 0;
+ if(p<=6)return 1;
+ if(p<=10)return 2;
+ if(p<=15)return 3;
+ return 4;
+}
+
+function aprenderRegimes(hist){
+ let n=[0,0,0,0,0],ac=[0,0,0,0,0];
+
+ for(let t=30;t<hist.length;t++){
+   const passado=hist.slice(0,t);
+   const real=new Set(hist[t].dezenas);
+
+   for(let d=1;d<=60;d++){
+     const f=faixa(passoAtual(passado,d));
+     n[f]++;
+     if(real.has(d))ac[f]++;
+   }
+ }
+
+ return n.map((x,i)=>{
+   const taxa=(ac[i]+2)/(x+20);
+   return {n:x,ac:ac[i],taxa,lift:taxa/.10};
+ });
+}
+
+/* M5 ORIGINAL — NÃO ALTERAR */
+
+function scoreM5(hist,d,regimes){
+ const p=passoAtual(hist,d);
+ const hz=hazard(hist,d);
+
+ return hz*.35+
+        regimes[faixa(p)].lift*.25+
+        freq(hist,d,25)*.15+
+        freq(hist,d,50)*.15+
+        freq(hist,d,100)*.10;
+}
+
+/*
+ Normalização transversal.
+ Converte cada variável para aproximadamente 0–1
+ dentro das 60 dezenas daquele ponto temporal.
+*/
+
+function normalizar(valores){
+ const min=Math.min(...valores);
+ const max=Math.max(...valores);
+
+ if(max===min)
+   return valores.map(()=>.5);
+
+ return valores.map(x=>(x-min)/(max-min));
+}
+
+function componentes(hist){
+
+ const regimes=aprenderRegimes(hist);
+
+ let raw=[];
+
+ for(let d=1;d<=60;d++){
+
+   const p=passoAtual(hist,d);
+
+   raw.push({
+     d,
+     m5:scoreM5(hist,d,regimes),
+     fg:freq(hist,d,hist.length),
+     f25:freq(hist,d,25),
+     f50:freq(hist,d,50),
+     f100:freq(hist,d,100),
+     f150:freq(hist,d,150),
+     atraso:p
+   });
+ }
+
+ const campos=["m5","fg","f25","f50","f100","f150","atraso"];
+
+ for(const campo of campos){
+   const norm=normalizar(raw.map(x=>x[campo]));
+   raw.forEach((x,i)=>x["n_"+campo]=norm[i]);
+ }
+
+ return raw;
+}
+
+/*
+ VARIANTES EXPERIMENTAIS
+
+ E0 = M5 puro (controle)
+ E1 = M5 + frequência geral
+ E2 = M5 + F25
+ E3 = M5 + F50
+ E4 = M5 + F100
+ E5 = M5 + F150
+ E6 = M5 + atraso
+ E7 = combinação das frequências
+ E8 = frequências + atraso
+
+ Pesos adicionais deliberadamente pequenos.
+ A V11 testa se há ganho; não presume que exista.
+*/
+
+const variantes=[
+ {nome:"E0 M5",      extras:[]},
+ {nome:"E1 +FG",      extras:["fg"]},
+ {nome:"E2 +F25",     extras:["f25"]},
+ {nome:"E3 +F50",     extras:["f50"]},
+ {nome:"E4 +F100",    extras:["f100"]},
+ {nome:"E5 +F150",    extras:["f150"]},
+ {nome:"E6 +Atraso",  extras:["atraso"]},
+ {nome:"E7 +Freqs",   extras:["fg","f25","f50","f100","f150"]},
+ {nome:"E8 +Tudo",    extras:["fg","f25","f50","f100","f150","atraso"]}
+];
+
+function rankingVariante(hist,v){
+
+ const c=componentes(hist);
+
+ for(const x of c){
+
+   if(v===0){
+     x.score=x.m5;
+     continue;
+   }
+
+   const ex=variantes[v].extras;
+
+   /*
+   80% M5 normalizado
+   20% dividido igualmente pelos extras.
+   */
+
+   let soma=0;
+   for(const e of ex)soma+=x["n_"+e];
+
+   const extra=ex.length?soma/ex.length:.5;
+
+   x.score=x.n_m5*.80+extra*.20;
+ }
+
+ c.sort((a,b)=>b.score-a.score||a.d-b.d);
+ return c;
+}
+
+function hits(rank,real,k){
+ const top=new Set(rank.slice(0,k).map(x=>x.d));
+ let a=0;
+ for(const d of real)if(top.has(d))a++;
+ return a;
+}
+
+function testar(hist,v,inicio,fim){
+
+ const ks=[6,10,15,20,25,30,40];
+
+ let soma={6:0,10:0,15:0,20:0,25:0,30:0,40:0};
+ let dist=[0,0,0,0,0,0,0];
+
+ for(let t=inicio;t<fim;t++){
+
+   const passado=hist.slice(0,t);
+   const rank=rankingVariante(passado,v);
+   const real=new Set(hist[t].dezenas);
+
+   for(const k of ks)
+     soma[k]+=hits(rank,real,k);
+
+   dist[hits(rank,real,10)]++;
+ }
+
+ const n=fim-inicio;
+ let medias={};
+
+ for(const k of ks)medias[k]=soma[k]/n;
+
+ return {n,medias,dist};
+}
+
+function fmt(x,n=3){
+ return Number(x).toFixed(n);
+}
+
+function corDelta(x){
+ if(x>.02)return "good";
+ if(x<-.02)return "bad";
+ return "warn";
+}
+
+function pausa(){
+ return new Promise(r=>setTimeout(r,25));
+}
+
+async function iniciar(){
+
+ const btn=document.getElementById("btn");
+ btn.disabled=true;
+
+ const hist=parseDados(document.getElementById("dados").value);
+
+ if(hist.length<100){
+   alert("Use pelo menos 100 concursos válidos.");
+   btn.disabled=false;
+   return;
+ }
+
+ const status=document.getElementById("status");
+
+ status.innerHTML=`
+ <div class="card">
+ <h2>PROCESSANDO...</h2>
+ <p id="ptxt">Preparando walk-forward.</p>
+ <div class="progress"><div id="bar" class="bar"></div></div>
+ </div>`;
+
+ await pausa();
+
+ /*
+ Mesmos blocos temporais da V10
+ */
+
+ let blocos=[];
+ let ini=35;
+
+ while(ini<hist.length){
+   const fim=Math.min(ini+25,hist.length);
+   blocos.push({inicio:ini,fim});
+   ini=fim;
+ }
+
+ let resultados=[];
+
+ for(let v=0;v<variantes.length;v++){
+
+   let br=[];
+
+   for(let b=0;b<blocos.length;b++){
+
+     document.getElementById("ptxt").innerText=
+       `${variantes[v].nome} — bloco ${b+1}/${blocos.length}`;
+
+     br.push(
+       testar(
+         hist,v,
+         blocos[b].inicio,
+         blocos[b].fim
+       )
+     );
+
+     const feito=
+       (v*blocos.length+b+1)/
+       (variantes.length*blocos.length);
+
+     document.getElementById("bar").style.width=
+       (feito*100)+"%";
+
+     await pausa();
+   }
+
+   resultados.push(br);
+ }
+
+ mostrar(hist,blocos,resultados);
+ btn.disabled=false;
+}
+
+function consolidar(blocosResultados){
+
+ const ks=[6,10,15,20,25,30,40];
+
+ let total=0;
+ let soma={6:0,10:0,15:0,20:0,25:0,30:0,40:0};
+
+ for(const r of blocosResultados){
+   total+=r.n;
+   for(const k of ks)
+     soma[k]+=r.medias[k]*r.n;
+ }
+
+ let medias={};
+ for(const k of ks)medias[k]=soma[k]/total;
+
+ return {total,medias};
+}
+
+function mostrar(hist,blocos,resultados){
+
+ const globais=resultados.map(consolidar);
+ const controle=globais[0];
+
+ /*
+ Escolha experimental baseada no Top10,
+ mas mostramos todos os cortes para auditoria.
+ */
+
+ let ordem=globais.map((x,i)=>({
+   i,
+   top10:x.medias[10],
+   delta:x.medias[10]-controle.medias[10]
+ }));
+
+ ordem.sort((a,b)=>b.top10-a.top10||a.i-b.i);
+
+ const vencedor=ordem[0].i;
+
+ let html=`
+ <div class="card">
+ <h2>V11 — ETAPA 1 CONCLUÍDA</h2>
+ <p>
+ Histórico: <b>${hist[0].concurso}–${hist.at(-1).concurso}</b><br>
+ Testes walk-forward: <b>${globais[0].total}</b><br>
+ Controle congelado: <b>E0 = M5 original</b>
+ </p>
+ </div>
+
+ <div class="card">
+ <h2>COMPARAÇÃO GLOBAL — TOP 10</h2>
+ <table>
+ <tr>
+ <th>Variante</th>
+ <th>Média</th>
+ <th>Baseline</th>
+ <th>Δ vs M5</th>
+ <th>Lift</th>
+ </tr>`;
+
+ ordem.forEach(x=>{
+
+   const m=globais[x.i].medias[10];
+
+   html+=`
+   <tr>
+   <td class="${x.i===vencedor?'best':''}">
+     ${variantes[x.i].nome}
+   </td>
+   <td><b>${fmt(m)}</b></td>
+   <td>1.000</td>
+   <td class="${corDelta(x.delta)}">
+     ${x.delta>=0?"+":""}${fmt(x.delta)}
+   </td>
+   <td>${fmt(m)}×</td>
+   </tr>`;
+ });
+
+ html+=`
+ </table>
+ </div>
+
+ <div class="card">
+ <h2>ESTABILIDADE — TOP 10</h2>
+ <table>
+ <tr>
+ <th>Variante</th>`;
+
+ blocos.forEach((b,i)=>{
+   html+=`<th>B${i+1}</th>`;
+ });
+
+ html+=`<th>Global</th></tr>`;
+
+ for(let v=0;v<variantes.length;v++){
+
+   html+=`<tr><td>${variantes[v].nome}</td>`;
+
+   resultados[v].forEach(r=>{
+
+     const m=r.medias[10];
+
+     html+=`
+     <td class="${m>1?'good':m<1?'bad':'warn'}">
+       ${fmt(m)}
+     </td>`;
+   });
+
+   html+=`
+   <td><b>${fmt(globais[v].medias[10])}</b></td>
+   </tr>`;
+ }
+
+ html+=`
+ </table>
+ <p class="sub">
+ B1=${hist[blocos[0].inicio].concurso}–
+ ${hist[blocos[0].fim-1].concurso}.
+ Os blocos seguintes continuam cronologicamente.
+ </p>
+ </div>
+
+ <div class="card">
+ <h2>VENCEDOR EXPERIMENTAL</h2>
+ <div class="metric">${variantes[vencedor].nome}</div>
+ <p>
+ Top 10 global:
+ <b>${fmt(globais[vencedor].medias[10])}</b><br>
+ M5 controle:
+ <b>${fmt(controle.medias[10])}</b><br>
+ Δ:
+ <span class="${corDelta(globais[vencedor].medias[10]-controle.medias[10])}">
+ ${globais[vencedor].medias[10]-controle.medias[10]>=0?"+":""}
+ ${fmt(globais[vencedor].medias[10]-controle.medias[10])}
+ </span>
+ </p>
+ <p class="sub">
+ Vencer esta etapa não significa aprovação automática.
+ A melhora precisa aparecer em diferentes blocos e
+ não apenas no resultado global.
+ </p>
+ </div>
+
+ <div class="card">
+ <h2>TODOS OS CORTES — VENCEDOR × M5</h2>
+ <table>
+ <tr>
+ <th>Grupo</th>
+ <th>M5</th>
+ <th>${variantes[vencedor].nome}</th>
+ <th>Δ</th>
+ <th>Baseline</th>
+ </tr>`;
+
+ for(const k of [6,10,15,20,25,30,40]){
+
+   const a=controle.medias[k];
+   const b=globais[vencedor].medias[k];
+   const d=b-a;
+   const base=k/10;
+
+   html+=`
+   <tr>
+   <td>Top ${k}</td>
+   <td>${fmt(a)}</td>
+   <td><b>${fmt(b)}</b></td>
+   <td class="${corDelta(d)}">
+   ${d>=0?"+":""}${fmt(d)}
+   </td>
+   <td>${fmt(base)}</td>
+   </tr>`;
+ }
+
+ html+=`
+ </table>
+ </div>
+
+ <div class="card">
+ <h2>DECISÃO DA ETAPA 1</h2>
+ <p class="sub">
+ Não incorporaremos nenhuma variável ao modelo
+ definitivo apenas porque ficou em primeiro lugar.
+ Primeiro verificaremos estabilidade temporal,
+ magnitude do ganho e comportamento nos demais
+ cortes Top-K.
+ </p>
+ </div>`;
+
+ document.getElementById("saida").innerHTML=html;
+
+ document.getElementById("saida")
+   .scrollIntoView({behavior:"smooth"});
+}
+
+</script>
+</body>
+</html>
