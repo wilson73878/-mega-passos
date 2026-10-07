@@ -1,0 +1,867 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Mega Passos V16 — Etapa 7</title>
+
+<style>
+*{box-sizing:border-box}
+body{
+ margin:0;background:#07111f;color:#f4f7fb;
+ font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif
+}
+.container{max-width:950px;margin:auto;padding:24px 18px 80px}
+h1{font-size:34px;margin-bottom:8px}
+h2{font-size:26px;margin-top:0}
+.sub{color:#aab6c9;line-height:1.55}
+.card{
+ background:#152136;border-radius:24px;
+ padding:24px;margin-top:22px;overflow:auto
+}
+textarea{
+ width:100%;height:270px;background:#0b1628;color:white;
+ border:2px solid #43516b;border-radius:18px;
+ padding:16px;font-size:16px
+}
+button{
+ width:100%;margin-top:18px;padding:20px;border:0;
+ border-radius:20px;background:#86d292;color:#1264ef;
+ font-weight:800;font-size:21px
+}
+button:disabled{opacity:.55}
+table{
+ width:100%;border-collapse:collapse;min-width:760px
+}
+th,td{
+ padding:11px 8px;border-bottom:1px solid #43516b;
+ text-align:center;white-space:nowrap
+}
+th{color:#9bd5a3}
+.good{color:#86d292;font-weight:800}
+.bad{color:#ff8989;font-weight:800}
+.warn{color:#ffd06c;font-weight:800}
+.best{color:#86d292;font-weight:900}
+.metric{font-size:30px;font-weight:800}
+.progress{
+ height:17px;background:#26354b;
+ border-radius:10px;overflow:hidden;margin-top:14px
+}
+.bar{height:100%;width:0;background:#86d292}
+</style>
+</head>
+
+<body>
+<div class="container">
+
+<h1>MEGA PASSOS V16 — ETAPA 7</h1>
+
+<p class="sub">
+Teste isolado de Quadrantes.
+O M5 permanece congelado como controle.
+</p>
+
+<div class="card">
+
+<h2>Histórico</h2>
+
+<p class="sub">
+Use somente <b>2918 até 3066</b>.<br>
+Não inclua o concurso 3067.
+</p>
+
+<textarea id="dados"
+placeholder="3066 04 06 09 13 28 48
+3065 08 10 30 38 50 53
+..."></textarea>
+
+<button id="btn" onclick="iniciar()">
+EXECUTAR V16 — ETAPA 7
+</button>
+
+</div>
+
+<div id="status"></div>
+<div id="saida"></div>
+
+</div>
+
+<script>
+
+/* =========================
+   PARSER
+========================= */
+
+function parseDados(txt){
+
+ let arr=[];
+
+ for(const l of txt.trim().split(/\n+/)){
+
+   const n=l.trim().split(/\s+/).map(Number);
+
+   if(n.length<7) continue;
+
+   const concurso=n[0];
+   const dezenas=n.slice(1,7);
+
+   if(!Number.isInteger(concurso)) continue;
+   if(new Set(dezenas).size!==6) continue;
+   if(dezenas.some(x=>x<1||x>60)) continue;
+
+   arr.push({concurso,dezenas});
+ }
+
+ arr.sort((a,b)=>a.concurso-b.concurso);
+
+ return arr;
+}
+
+/* =========================
+   M5 ORIGINAL
+========================= */
+
+function passoAtual(hist,d){
+
+ for(let i=hist.length-1;i>=0;i--){
+
+   if(hist[i].dezenas.includes(d))
+     return hist.length-i;
+ }
+
+ return hist.length+1;
+}
+
+function freq(hist,d,n){
+
+ const h=n>=hist.length ? hist : hist.slice(-n);
+
+ if(!h.length) return 0;
+
+ let c=0;
+
+ for(const x of h)
+   if(x.dezenas.includes(d))
+     c++;
+
+ return c/h.length;
+}
+
+function gaps(hist,d){
+
+ let p=[];
+
+ hist.forEach((x,i)=>{
+   if(x.dezenas.includes(d))
+     p.push(i);
+ });
+
+ let g=[];
+
+ for(let i=1;i<p.length;i++)
+   g.push(p[i]-p[i-1]);
+
+ return g;
+}
+
+function hazard(hist,d){
+
+ const p=passoAtual(hist,d);
+ const gs=gaps(hist,d);
+
+ if(!gs.length) return .10;
+
+ let chegou=0;
+ let saiu=0;
+
+ for(const g of gs){
+
+   if(g>=p) chegou++;
+   if(g===p) saiu++;
+ }
+
+ return (saiu+1)/(chegou+10);
+}
+
+function faixa(p){
+
+ if(p<=3) return 0;
+ if(p<=6) return 1;
+ if(p<=10) return 2;
+ if(p<=15) return 3;
+
+ return 4;
+}
+
+function aprenderRegimes(hist){
+
+ let n=[0,0,0,0,0];
+ let ac=[0,0,0,0,0];
+
+ for(let t=30;t<hist.length;t++){
+
+   const passado=hist.slice(0,t);
+   const real=new Set(hist[t].dezenas);
+
+   for(let d=1;d<=60;d++){
+
+     const f=faixa(passoAtual(passado,d));
+
+     n[f]++;
+
+     if(real.has(d))
+       ac[f]++;
+   }
+ }
+
+ return n.map((x,i)=>{
+
+   const taxa=(ac[i]+2)/(x+20);
+
+   return {
+     n:x,
+     ac:ac[i],
+     taxa,
+     lift:taxa/.10
+   };
+ });
+}
+
+function scoreM5(hist,d,regimes){
+
+ const p=passoAtual(hist,d);
+ const hz=hazard(hist,d);
+
+ return (
+   hz*.35 +
+   regimes[faixa(p)].lift*.25 +
+   freq(hist,d,25)*.15 +
+   freq(hist,d,50)*.15 +
+   freq(hist,d,100)*.10
+ );
+}
+
+/* =========================
+   QUADRANTES
+
+   Q1 = 01–15
+   Q2 = 16–30
+   Q3 = 31–45
+   Q4 = 46–60
+========================= */
+
+function quadrante(d){
+
+ if(d<=15) return 0;
+ if(d<=30) return 1;
+ if(d<=45) return 2;
+
+ return 3;
+}
+
+/*
+Calcula a participação histórica
+de cada quadrante usando SOMENTE
+o passado disponível.
+*/
+
+function aprenderQuadrantes(hist){
+
+ let ocorr=[0,0,0,0];
+
+ let total=0;
+
+ for(const x of hist){
+
+   for(const d of x.dezenas){
+
+     ocorr[quadrante(d)]++;
+     total++;
+   }
+ }
+
+ return ocorr.map(x=>
+   (x+5)/(total+20)
+ );
+}
+
+/*
+Cada quadrante contém exatamente
+15 dezenas.
+
+Como os grupos têm o mesmo tamanho,
+o baseline estrutural é 25%.
+
+O sinal é expresso como lift em
+relação a 0,25.
+*/
+
+function sinalQuadrante(hist,d){
+
+ if(!hist.length)
+   return 1;
+
+ const taxas=
+   aprenderQuadrantes(hist);
+
+ return taxas[quadrante(d)]/.25;
+}
+
+/* =========================
+   NORMALIZAÇÃO
+========================= */
+
+function normalizar(v){
+
+ const min=Math.min(...v);
+ const max=Math.max(...v);
+
+ if(max===min)
+   return v.map(()=>.5);
+
+ return v.map(
+   x=>(x-min)/(max-min)
+ );
+}
+
+/* =========================
+   COMPONENTES
+========================= */
+
+function componentes(hist){
+
+ const regimes=aprenderRegimes(hist);
+
+ let r=[];
+
+ for(let d=1;d<=60;d++){
+
+   r.push({
+
+     d,
+
+     m5:
+       scoreM5(
+         hist,d,regimes
+       ),
+
+     quadrante:
+       sinalQuadrante(
+         hist,d
+       )
+   });
+ }
+
+ for(const campo of [
+   "m5",
+   "quadrante"
+ ]){
+
+   const n=
+     normalizar(
+       r.map(x=>x[campo])
+     );
+
+   r.forEach((x,i)=>{
+     x["n_"+campo]=n[i];
+   });
+ }
+
+ return r;
+}
+
+/* =========================
+   VARIANTES
+
+   H0 = controle M5
+   H1 = 80% M5 + 20% Quadrantes
+========================= */
+
+const variantes=[
+
+ {
+   nome:"H0 M5",
+   extras:[]
+ },
+
+ {
+   nome:"H1 +Quadrantes",
+   extras:["quadrante"]
+ }
+
+];
+
+/* =========================
+   RANKING
+========================= */
+
+function rankingVariante(hist,v){
+
+ const c=componentes(hist);
+
+ for(const x of c){
+
+   if(v===0){
+
+     x.score=x.m5;
+     continue;
+   }
+
+   x.score=
+     x.n_m5*.80 +
+     x.n_quadrante*.20;
+ }
+
+ c.sort(
+   (a,b)=>
+   b.score-a.score ||
+   a.d-b.d
+ );
+
+ return c;
+}
+
+function hits(rank,real,k){
+
+ const top=
+   new Set(
+     rank.slice(0,k).map(x=>x.d)
+   );
+
+ let n=0;
+
+ for(const d of real)
+   if(top.has(d))
+     n++;
+
+ return n;
+}
+
+/* =========================
+   WALK-FORWARD
+========================= */
+
+function testar(hist,v,inicio,fim){
+
+ const ks=[6,10,15,20,25,30,40];
+
+ let soma={
+   6:0,10:0,15:0,20:0,
+   25:0,30:0,40:0
+ };
+
+ for(let t=inicio;t<fim;t++){
+
+   const passado=hist.slice(0,t);
+
+   const rank=
+     rankingVariante(
+       passado,v
+     );
+
+   const real=
+     new Set(hist[t].dezenas);
+
+   for(const k of ks)
+     soma[k]+=hits(rank,real,k);
+ }
+
+ const n=fim-inicio;
+
+ let medias={};
+
+ for(const k of ks)
+   medias[k]=soma[k]/n;
+
+ return {n,medias};
+}
+
+function consolidar(rs){
+
+ const ks=[6,10,15,20,25,30,40];
+
+ let total=0;
+
+ let soma={
+   6:0,10:0,15:0,20:0,
+   25:0,30:0,40:0
+ };
+
+ for(const r of rs){
+
+   total+=r.n;
+
+   for(const k of ks)
+     soma[k]+=r.medias[k]*r.n;
+ }
+
+ let medias={};
+
+ for(const k of ks)
+   medias[k]=soma[k]/total;
+
+ return {total,medias};
+}
+
+function fmt(x,n=3){
+ return Number(x).toFixed(n);
+}
+
+function cor(x){
+
+ if(x>.02) return "good";
+ if(x<-.02) return "bad";
+
+ return "warn";
+}
+
+function pausa(){
+ return new Promise(r=>setTimeout(r,25));
+}
+
+/* =========================
+   EXECUÇÃO
+========================= */
+
+async function iniciar(){
+
+ const btn=document.getElementById("btn");
+
+ btn.disabled=true;
+
+ const hist=
+   parseDados(
+     document.getElementById("dados").value
+   );
+
+ if(hist.length<100){
+
+   alert("Use pelo menos 100 concursos válidos.");
+
+   btn.disabled=false;
+   return;
+ }
+
+ const status=document.getElementById("status");
+
+ status.innerHTML=`
+ <div class="card">
+ <h2>PROCESSANDO ETAPA 7...</h2>
+ <p id="ptxt">Preparando walk-forward.</p>
+ <div class="progress">
+ <div class="bar" id="bar"></div>
+ </div>
+ </div>
+ `;
+
+ await pausa();
+
+ let blocos=[];
+ let ini=35;
+
+ while(ini<hist.length){
+
+   const fim=Math.min(ini+25,hist.length);
+
+   blocos.push({
+     inicio:ini,
+     fim
+   });
+
+   ini=fim;
+ }
+
+ let resultados=[];
+
+ for(let v=0;v<variantes.length;v++){
+
+   let br=[];
+
+   for(let b=0;b<blocos.length;b++){
+
+     document.getElementById("ptxt").innerText=
+       `${variantes[v].nome} — bloco ${b+1}/${blocos.length}`;
+
+     br.push(
+       testar(
+         hist,
+         v,
+         blocos[b].inicio,
+         blocos[b].fim
+       )
+     );
+
+     const feito=
+       (
+         v*blocos.length+
+         b+1
+       )/
+       (
+         variantes.length*
+         blocos.length
+       );
+
+     document.getElementById("bar").style.width=
+       feito*100+"%";
+
+     await pausa();
+   }
+
+   resultados.push(br);
+ }
+
+ mostrar(hist,blocos,resultados);
+
+ btn.disabled=false;
+}
+
+/* =========================
+   RESULTADOS
+========================= */
+
+function mostrar(hist,blocos,resultados){
+
+ const globais=resultados.map(consolidar);
+
+ const controle=globais[0];
+
+ const candidato=globais[1];
+
+ const delta=
+   candidato.medias[10]-
+   controle.medias[10];
+
+ let html=`
+
+ <div class="card">
+
+ <h2>ETAPA 7 CONCLUÍDA</h2>
+
+ <p>
+ Histórico:
+ <b>
+ ${hist[0].concurso}–
+ ${hist.at(-1).concurso}
+ </b>
+ <br>
+
+ Testes walk-forward:
+ <b>${controle.total}</b>
+ </p>
+
+ </div>
+
+ <div class="card">
+
+ <h2>COMPARAÇÃO GLOBAL — TOP 10</h2>
+
+ <table>
+
+ <tr>
+ <th>Variante</th>
+ <th>Média</th>
+ <th>Baseline</th>
+ <th>Δ vs M5</th>
+ </tr>
+
+ <tr>
+ <td class="best">H0 M5</td>
+ <td><b>${fmt(controle.medias[10])}</b></td>
+ <td>1.000</td>
+ <td class="warn">+0.000</td>
+ </tr>
+
+ <tr>
+ <td>H1 +Quadrantes</td>
+ <td><b>${fmt(candidato.medias[10])}</b></td>
+ <td>1.000</td>
+
+ <td class="${cor(delta)}">
+ ${delta>=0?"+":""}${fmt(delta)}
+ </td>
+
+ </tr>
+
+ </table>
+ </div>
+
+ <div class="card">
+
+ <h2>ESTABILIDADE — TOP 10</h2>
+
+ <table>
+
+ <tr>
+ <th>Variante</th>
+ `;
+
+ blocos.forEach((b,i)=>{
+   html+=`<th>B${i+1}</th>`;
+ });
+
+ html+=`
+ <th>Global</th>
+ </tr>
+ `;
+
+ for(let v=0;v<2;v++){
+
+   html+=`
+   <tr>
+   <td>${variantes[v].nome}</td>
+   `;
+
+   resultados[v].forEach(r=>{
+
+     const m=r.medias[10];
+
+     html+=`
+     <td class="${
+       m>1?"good":
+       m<1?"bad":
+       "warn"
+     }">
+     ${fmt(m)}
+     </td>
+     `;
+   });
+
+   html+=`
+   <td>
+   <b>${fmt(globais[v].medias[10])}</b>
+   </td>
+   </tr>
+   `;
+ }
+
+ html+=`
+ </table>
+
+ <p class="sub">
+ B1 =
+ ${hist[blocos[0].inicio].concurso}–
+ ${hist[blocos[0].fim-1].concurso}.
+ Os demais blocos seguem cronologicamente.
+ </p>
+
+ </div>
+
+ <div class="card">
+
+ <h2>TODOS OS CORTES — H1 × M5</h2>
+
+ <table>
+
+ <tr>
+ <th>Grupo</th>
+ <th>M5</th>
+ <th>H1 Quadrantes</th>
+ <th>Δ</th>
+ <th>Baseline</th>
+ </tr>
+ `;
+
+ for(const k of [6,10,15,20,25,30,40]){
+
+   const a=controle.medias[k];
+   const b=candidato.medias[k];
+   const d=b-a;
+
+   html+=`
+
+   <tr>
+
+   <td>Top ${k}</td>
+
+   <td>${fmt(a)}</td>
+
+   <td><b>${fmt(b)}</b></td>
+
+   <td class="${cor(d)}">
+   ${d>=0?"+":""}${fmt(d)}
+   </td>
+
+   <td>${fmt(k/10)}</td>
+
+   </tr>
+   `;
+ }
+
+ html+=`
+ </table>
+ </div>
+
+ <div class="card">
+
+ <h2>DECISÃO EXPERIMENTAL</h2>
+
+ <div class="metric">
+
+ ${
+   delta>0 ?
+   "H1 SUPEROU M5 NO GLOBAL" :
+   delta<0 ?
+   "M5 PERMANECE SUPERIOR" :
+   "EMPATE NO TOP 10"
+ }
+
+ </div>
+
+ <p class="sub">
+
+ Esta mensagem considera apenas o
+ resultado global Top 10.
+
+ A decisão de incorporar Quadrantes
+ não será automática.
+
+ Também analisaremos B1–B5 e
+ Top 6/10/15/20/25/30/40 antes
+ de qualquer alteração no modelo.
+
+ </p>
+
+ </div>
+
+ <div class="card">
+
+ <h2>REGRA DA ETAPA 7</h2>
+
+ <p class="sub">
+
+ Quadrantes utilizados:
+ <br><br>
+
+ Q1 = 01–15<br>
+ Q2 = 16–30<br>
+ Q3 = 31–45<br>
+ Q4 = 46–60
+
+ <br><br>
+
+ Todos possuem 15 dezenas, portanto
+ o baseline estrutural é 25%.
+
+ O cálculo de cada alvo utiliza
+ exclusivamente concursos anteriores,
+ preservando o walk-forward.
+
+ <br><br>
+
+ <b>M5 continua congelado.</b>
+
+ </p>
+
+ </div>
+ `;
+
+ document.getElementById("saida").innerHTML=html;
+
+ document.getElementById("saida").scrollIntoView({
+   behavior:"smooth"
+ });
+}
+
+</script>
+</body>
+</html>
