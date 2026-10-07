@@ -1,0 +1,883 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Mega Passos V19 — Etapa 10</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#07111f;color:#f4f7fb;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif}
+.container{max-width:1050px;margin:auto;padding:24px 18px 80px}
+h1{font-size:34px;margin-bottom:8px}
+h2{font-size:25px;margin-top:0}
+.sub{color:#aab6c9;line-height:1.55}
+.card{background:#152136;border-radius:24px;padding:24px;margin-top:22px;overflow:auto}
+textarea{width:100%;height:300px;background:#0b1628;color:white;border:2px solid #43516b;border-radius:18px;padding:16px;font-size:15px}
+button{width:100%;margin-top:18px;padding:20px;border:0;border-radius:20px;background:#86d292;color:#1264ef;font-weight:800;font-size:21px}
+button:disabled{opacity:.55}
+table{width:100%;border-collapse:collapse;min-width:820px}
+th,td{padding:11px 8px;border-bottom:1px solid #43516b;text-align:center;white-space:nowrap}
+th{color:#9bd5a3}
+.good{color:#86d292;font-weight:800}
+.bad{color:#ff8989;font-weight:800}
+.warn{color:#ffd06c;font-weight:800}
+.metric{font-size:29px;font-weight:900}
+.progress{height:17px;background:#26354b;border-radius:10px;overflow:hidden;margin-top:14px}
+.bar{height:100%;width:0;background:#86d292}
+</style>
+</head>
+
+<body>
+<div class="container">
+
+<h1>MEGA PASSOS V19 — ETAPA 10</h1>
+
+<p class="sub">
+Regimes pré-sorteio + validação fora da amostra.
+M5 permanece congelado.
+</p>
+
+<div class="card">
+<h2>Histórico completo</h2>
+
+<p class="sub">
+Cole <b>1 até 3066</b>.<br>
+Não inclua 3067.<br>
+A V19 separará automaticamente desenvolvimento e validação.
+</p>
+
+<textarea id="dados"
+placeholder="1 04 05 30 33 41 52
+...
+3066 04 06 09 13 28 48"></textarea>
+
+<button id="btn" onclick="iniciar()">
+EXECUTAR V19 — REGIMES OOS
+</button>
+</div>
+
+<div id="status"></div>
+<div id="saida"></div>
+
+</div>
+
+<script>
+
+/* ============================
+   PARSER — V18
+============================ */
+
+function parseDados(txt){
+ let arr=[];
+
+ for(const l of txt.trim().split(/\n+/)){
+   const n=l.trim().split(/\s+/).map(Number);
+   if(n.length<7) continue;
+
+   const concurso=n[0];
+   const dezenas=n.slice(1,7);
+
+   if(!Number.isInteger(concurso)) continue;
+   if(new Set(dezenas).size!==6) continue;
+   if(dezenas.some(x=>x<1||x>60)) continue;
+
+   arr.push({concurso,dezenas});
+ }
+
+ arr.sort((a,b)=>a.concurso-b.concurso);
+ return arr;
+}
+
+/* ============================
+   M5 ORIGINAL — CONGELADO
+============================ */
+
+function passoAtual(hist,d){
+ for(let i=hist.length-1;i>=0;i--){
+   if(hist[i].dezenas.includes(d))
+     return hist.length-i;
+ }
+ return hist.length+1;
+}
+
+function freq(hist,d,n){
+ const h=n>=hist.length ? hist : hist.slice(-n);
+ if(!h.length) return 0;
+
+ let c=0;
+ for(const x of h)
+   if(x.dezenas.includes(d))
+     c++;
+
+ return c/h.length;
+}
+
+function gaps(hist,d){
+ let p=[];
+
+ hist.forEach((x,i)=>{
+   if(x.dezenas.includes(d))
+     p.push(i);
+ });
+
+ let g=[];
+ for(let i=1;i<p.length;i++)
+   g.push(p[i]-p[i-1]);
+
+ return g;
+}
+
+function hazard(hist,d){
+ const p=passoAtual(hist,d);
+ const gs=gaps(hist,d);
+
+ if(!gs.length) return .10;
+
+ let chegou=0;
+ let saiu=0;
+
+ for(const g of gs){
+   if(g>=p) chegou++;
+   if(g===p) saiu++;
+ }
+
+ return (saiu+1)/(chegou+10);
+}
+
+function faixa(p){
+ if(p<=3) return 0;
+ if(p<=6) return 1;
+ if(p<=10) return 2;
+ if(p<=15) return 3;
+ return 4;
+}
+
+function aprenderRegimes(hist){
+ let n=[0,0,0,0,0];
+ let ac=[0,0,0,0,0];
+
+ for(let t=30;t<hist.length;t++){
+   const passado=hist.slice(0,t);
+   const real=new Set(hist[t].dezenas);
+
+   for(let d=1;d<=60;d++){
+     const f=faixa(passoAtual(passado,d));
+     n[f]++;
+     if(real.has(d)) ac[f]++;
+   }
+ }
+
+ return n.map((x,i)=>{
+   const taxa=(ac[i]+2)/(x+20);
+
+   return{
+     n:x,
+     ac:ac[i],
+     taxa,
+     lift:taxa/.10
+   };
+ });
+}
+
+function scoreM5(hist,d,regimes){
+ const p=passoAtual(hist,d);
+ const hz=hazard(hist,d);
+
+ return(
+   hz*.35 +
+   regimes[faixa(p)].lift*.25 +
+   freq(hist,d,25)*.15 +
+   freq(hist,d,50)*.15 +
+   freq(hist,d,100)*.10
+ );
+}
+
+function rankingM5(hist){
+ const regimes=aprenderRegimes(hist);
+ let r=[];
+
+ for(let d=1;d<=60;d++){
+   r.push({
+     d,
+     score:scoreM5(hist,d,regimes)
+   });
+ }
+
+ r.sort((a,b)=>b.score-a.score || a.d-b.d);
+ return r;
+}
+
+function hits(rank,real,k){
+ const top=new Set(rank.slice(0,k).map(x=>x.d));
+ let n=0;
+
+ for(const d of real)
+   if(top.has(d)) n++;
+
+ return n;
+}
+
+/* ============================
+   REGIMES PRÉ-SORTEIO
+============================ */
+
+/*
+Nenhuma informação do concurso alvo
+entra nestes quatro indicadores.
+*/
+
+function estadoAntes(hist){
+
+ let passos=[];
+ let f25=[];
+
+ for(let d=1;d<=60;d++){
+   passos.push(passoAtual(hist,d));
+   f25.push(freq(hist,d,25));
+ }
+
+ const mediaPasso=
+   passos.reduce((a,b)=>a+b,0)/60;
+
+ const atrasadas=
+   passos.filter(x=>x>=16).length/60;
+
+ /*
+ Concentração recente:
+ média das 10 maiores frequências F25.
+ */
+ const ordF=[...f25].sort((a,b)=>b-a);
+
+ const concentracao25=
+   ordF.slice(0,10)
+       .reduce((a,b)=>a+b,0)/10;
+
+ /*
+ Desvio-padrão dos passos atuais.
+ */
+ const varP=
+   passos.reduce(
+     (s,x)=>s+(x-mediaPasso)**2,0
+   )/60;
+
+ const dispersaoPasso=Math.sqrt(varP);
+
+ return{
+   mediaPasso,
+   atrasadas,
+   concentracao25,
+   dispersaoPasso
+ };
+}
+
+/* ============================
+   QUANTIS
+============================ */
+
+function quantil(v,q){
+ const a=[...v].sort((x,y)=>x-y);
+
+ if(!a.length) return 0;
+
+ const pos=(a.length-1)*q;
+ const base=Math.floor(pos);
+ const resto=pos-base;
+
+ if(a[base+1]!==undefined)
+   return a[base]+resto*(a[base+1]-a[base]);
+
+ return a[base];
+}
+
+function limitesDesenvolvimento(registros,campo){
+ const v=registros.map(x=>x.estado[campo]);
+
+ return{
+   q1:quantil(v,1/3),
+   q2:quantil(v,2/3)
+ };
+}
+
+function classe(x,lim){
+ if(x<=lim.q1) return 0;
+ if(x<=lim.q2) return 1;
+ return 2;
+}
+
+function nomeClasse(c){
+ return ["BAIXO","MÉDIO","ALTO"][c];
+}
+
+/* ============================
+   ACUMULADORES
+============================ */
+
+function criarAcc(){
+ return{
+   n:0,
+   soma:{
+     6:0,10:0,15:0,20:0,
+     25:0,30:0,40:0
+   }
+ };
+}
+
+function registrarAcc(acc,hs){
+ acc.n++;
+
+ for(const k of [6,10,15,20,25,30,40])
+   acc.soma[k]+=hs[k];
+}
+
+function mediaAcc(acc,k){
+ return acc.n ? acc.soma[k]/acc.n : 0;
+}
+
+/* ============================
+   GERAÇÃO WALK-FORWARD
+============================ */
+
+async function gerarRegistros(hist){
+
+ let registros=[];
+ const inicio=100;
+
+ for(let t=inicio;t<hist.length;t++){
+
+   const passado=hist.slice(0,t);
+
+   const estado=estadoAntes(passado);
+   const rank=rankingM5(passado);
+   const real=new Set(hist[t].dezenas);
+
+   let hs={};
+
+   for(const k of [6,10,15,20,25,30,40])
+     hs[k]=hits(rank,real,k);
+
+   registros.push({
+     concurso:hist[t].concurso,
+     estado,
+     hs
+   });
+
+   if((t-inicio)%25===0){
+
+     const p=
+       (t-inicio+1)/(hist.length-inicio);
+
+     document.getElementById("bar").style.width=
+       (p*90)+"%";
+
+     document.getElementById("ptxt").innerText=
+       `Walk-forward: concurso ${hist[t].concurso}`;
+
+     await new Promise(r=>setTimeout(r,0));
+   }
+ }
+
+ return registros;
+}
+
+/* ============================
+   ANÁLISE DE UM INDICADOR
+============================ */
+
+function analisarCampo(dev,val,campo){
+
+ const lim=limitesDesenvolvimento(dev,campo);
+
+ let d=[
+   criarAcc(),
+   criarAcc(),
+   criarAcc()
+ ];
+
+ let v=[
+   criarAcc(),
+   criarAcc(),
+   criarAcc()
+ ];
+
+ for(const r of dev){
+   const c=classe(r.estado[campo],lim);
+   registrarAcc(d[c],r.hs);
+ }
+
+ for(const r of val){
+   const c=classe(r.estado[campo],lim);
+   registrarAcc(v[c],r.hs);
+ }
+
+ return{lim,d,v};
+}
+
+/* ============================
+   ESTATÍSTICA TOP10
+============================ */
+
+function estatTop10(acc){
+
+ if(!acc.n)
+   return{media:0,ep:0,z:0,inf:0,sup:0};
+
+ const media=mediaAcc(acc,10);
+
+ const variancia=
+   6*
+   (10/60)*
+   (1-10/60)*
+   ((60-6)/(60-1));
+
+ const ep=Math.sqrt(variancia/acc.n);
+ const z=(media-1)/ep;
+
+ return{
+   media,
+   ep,
+   z,
+   inf:media-1.96*ep,
+   sup:media+1.96*ep
+ };
+}
+
+function fmt(x,n=3){
+ return Number(x).toFixed(n);
+}
+
+function corMedia(x){
+ if(x>1.02) return "good";
+ if(x<.98) return "bad";
+ return "warn";
+}
+
+/* ============================
+   EXECUÇÃO
+============================ */
+
+async function iniciar(){
+
+ const btn=document.getElementById("btn");
+ btn.disabled=true;
+
+ const hist=parseDados(
+   document.getElementById("dados").value
+ );
+
+ if(hist.length<1000){
+   alert(
+     "Use o histórico completo 1–3066. "+
+     "Reconhecidos: "+hist.length
+   );
+   btn.disabled=false;
+   return;
+ }
+
+ if(hist.some(x=>x.concurso>=3067)){
+   alert(
+     "Remova 3067 ou qualquer concurso posterior. "+
+     "A V19 termina em 3066."
+   );
+   btn.disabled=false;
+   return;
+ }
+
+ document.getElementById("status").innerHTML=`
+ <div class="card">
+ <h2>PROCESSANDO V19...</h2>
+ <p id="ptxt" class="sub">
+ Gerando walk-forward sem olhar o futuro.
+ </p>
+ <div class="progress">
+ <div class="bar" id="bar"></div>
+ </div>
+ </div>`;
+
+ const registros=await gerarRegistros(hist);
+
+ /*
+ Separação cronológica 70/30.
+ Os primeiros 70% formam DEV.
+ Os últimos 30% são VALIDAÇÃO OOS.
+ */
+
+ const corte=Math.floor(registros.length*.70);
+
+ const dev=registros.slice(0,corte);
+ const val=registros.slice(corte);
+
+ const campos=[
+   {
+     id:"mediaPasso",
+     nome:"Passo médio"
+   },
+   {
+     id:"atrasadas",
+     nome:"Dezenas com passo ≥16"
+   },
+   {
+     id:"concentracao25",
+     nome:"Concentração F25"
+   },
+   {
+     id:"dispersaoPasso",
+     nome:"Dispersão dos passos"
+   }
+ ];
+
+ let analises={};
+
+ for(const c of campos)
+   analises[c.id]=
+     analisarCampo(dev,val,c.id);
+
+ document.getElementById("bar").style.width="100%";
+
+ mostrar(hist,registros,dev,val,campos,analises);
+
+ btn.disabled=false;
+}
+
+/* ============================
+   RESULTADOS
+============================ */
+
+function mostrar(hist,registros,dev,val,campos,analises){
+
+ let globalDev=criarAcc();
+ let globalVal=criarAcc();
+
+ dev.forEach(r=>registrarAcc(globalDev,r.hs));
+ val.forEach(r=>registrarAcc(globalVal,r.hs));
+
+ const ed=estatTop10(globalDev);
+ const ev=estatTop10(globalVal);
+
+ let html=`
+
+ <div class="card">
+
+ <h2>ETAPA 10 CONCLUÍDA</h2>
+
+ <p>
+ Histórico:
+ <b>${hist[0].concurso}–${hist.at(-1).concurso}</b>
+ <br>
+
+ Total walk-forward:
+ <b>${registros.length}</b>
+ <br>
+
+ Desenvolvimento:
+ <b>${dev.length}</b>
+ (${dev[0].concurso}–${dev.at(-1).concurso})
+ <br>
+
+ Validação OOS:
+ <b>${val.length}</b>
+ (${val[0].concurso}–${val.at(-1).concurso})
+ </p>
+
+ </div>
+
+ <div class="card">
+
+ <h2>M5 — DEV × VALIDAÇÃO OOS</h2>
+
+ <table>
+ <tr>
+ <th>Amostra</th>
+ <th>N</th>
+ <th>Top6</th>
+ <th>Top10</th>
+ <th>Top15</th>
+ <th>Top20</th>
+ <th>Z Top10</th>
+ <th>IC95% Top10</th>
+ </tr>
+
+ <tr>
+ <td>DEV</td>
+ <td>${globalDev.n}</td>
+ <td>${fmt(mediaAcc(globalDev,6))}</td>
+ <td><b>${fmt(ed.media)}</b></td>
+ <td>${fmt(mediaAcc(globalDev,15))}</td>
+ <td>${fmt(mediaAcc(globalDev,20))}</td>
+ <td>${fmt(ed.z,2)}</td>
+ <td>${fmt(ed.inf)}–${fmt(ed.sup)}</td>
+ </tr>
+
+ <tr>
+ <td>VALIDAÇÃO</td>
+ <td>${globalVal.n}</td>
+ <td>${fmt(mediaAcc(globalVal,6))}</td>
+ <td class="${corMedia(ev.media)}">
+ <b>${fmt(ev.media)}</b>
+ </td>
+ <td>${fmt(mediaAcc(globalVal,15))}</td>
+ <td>${fmt(mediaAcc(globalVal,20))}</td>
+ <td>${fmt(ev.z,2)}</td>
+ <td>${fmt(ev.inf)}–${fmt(ev.sup)}</td>
+ </tr>
+
+ </table>
+
+ <p class="sub">
+ A validação não participa da definição dos
+ limites BAIXO/MÉDIO/ALTO.
+ </p>
+
+ </div>
+ `;
+
+ for(const c of campos){
+
+   const a=analises[c.id];
+
+   html+=`
+
+   <div class="card">
+
+   <h2>${c.nome}</h2>
+
+   <p class="sub">
+   Limites aprendidos somente no DEV:
+   Q1 = <b>${fmt(a.lim.q1,4)}</b> |
+   Q2 = <b>${fmt(a.lim.q2,4)}</b>
+   </p>
+
+   <table>
+
+   <tr>
+   <th>Regime</th>
+   <th>N DEV</th>
+   <th>Top10 DEV</th>
+   <th>N OOS</th>
+   <th>Top6 OOS</th>
+   <th>Top10 OOS</th>
+   <th>Top15 OOS</th>
+   <th>Top20 OOS</th>
+   <th>Z OOS</th>
+   </tr>
+   `;
+
+   for(let i=0;i<3;i++){
+
+     const sd=estatTop10(a.d[i]);
+     const sv=estatTop10(a.v[i]);
+
+     html+=`
+
+     <tr>
+
+     <td><b>${nomeClasse(i)}</b></td>
+
+     <td>${a.d[i].n}</td>
+
+     <td class="${corMedia(sd.media)}">
+     ${fmt(sd.media)}
+     </td>
+
+     <td>${a.v[i].n}</td>
+
+     <td>
+     ${fmt(mediaAcc(a.v[i],6))}
+     </td>
+
+     <td class="${corMedia(sv.media)}">
+     <b>${fmt(sv.media)}</b>
+     </td>
+
+     <td>
+     ${fmt(mediaAcc(a.v[i],15))}
+     </td>
+
+     <td>
+     ${fmt(mediaAcc(a.v[i],20))}
+     </td>
+
+     <td>
+     ${fmt(sv.z,2)}
+     </td>
+
+     </tr>
+     `;
+   }
+
+   html+=`
+   </table>
+   </div>
+   `;
+ }
+
+ /*
+ Procura apenas replicações:
+ DEV > 1 e OOS > 1.
+ Não modifica o modelo.
+ */
+
+ let sobreviventes=[];
+
+ for(const c of campos){
+
+   const a=analises[c.id];
+
+   for(let i=0;i<3;i++){
+
+     const md=mediaAcc(a.d[i],10);
+     const mv=mediaAcc(a.v[i],10);
+     const sv=estatTop10(a.v[i]);
+
+     if(md>1 && mv>1){
+
+       sobreviventes.push({
+         nome:c.nome,
+         regime:nomeClasse(i),
+         dev:md,
+         oos:mv,
+         n:a.v[i].n,
+         z:sv.z,
+         inf:sv.inf
+       });
+     }
+   }
+ }
+
+ sobreviventes.sort(
+   (a,b)=>b.oos-a.oos
+ );
+
+ html+=`
+
+ <div class="card">
+
+ <h2>REPLICAÇÃO DEV → OOS</h2>
+ `;
+
+ if(!sobreviventes.length){
+
+   html+=`
+
+   <div class="metric">
+   NENHUM REGIME REPLICOU
+   </div>
+
+   <p class="sub">
+   Nenhuma condição apresentou Top10 acima
+   de 1,000 simultaneamente no desenvolvimento
+   e na validação.
+   </p>
+   `;
+
+ }else{
+
+   html+=`
+
+   <table>
+
+   <tr>
+   <th>Indicador</th>
+   <th>Regime</th>
+   <th>DEV</th>
+   <th>OOS</th>
+   <th>N OOS</th>
+   <th>Z OOS</th>
+   <th>IC inferior</th>
+   </tr>
+   `;
+
+   for(const s of sobreviventes){
+
+     html+=`
+
+     <tr>
+     <td>${s.nome}</td>
+     <td><b>${s.regime}</b></td>
+     <td>${fmt(s.dev)}</td>
+     <td class="good"><b>${fmt(s.oos)}</b></td>
+     <td>${s.n}</td>
+     <td>${fmt(s.z,2)}</td>
+     <td>${fmt(s.inf)}</td>
+     </tr>
+     `;
+   }
+
+   html+=`</table>`;
+ }
+
+ html+=`
+ </div>
+
+ <div class="card">
+
+ <h2>CRITÉRIO RIGOROSO</h2>
+
+ <p class="sub">
+
+ Um regime aparecer na tabela de replicação
+ <b>não significa que foi validado</b>.
+
+ <br><br>
+
+ Para evidência mais forte, queremos:
+ desempenho acima de 1,000 no DEV,
+ acima de 1,000 na validação,
+ amostra OOS adequada e, principalmente,
+ intervalo de confiança OOS que não dependa
+ apenas de flutuação aleatória.
+
+ <br><br>
+
+ Nenhum regime será usado para alterar os
+ pesos do M5 nesta etapa.
+
+ </p>
+
+ </div>
+
+ <div class="card">
+
+ <h2>CONTROLE V19</h2>
+
+ <p class="sub">
+
+ M5 permanece:
+ <br><br>
+
+ <b>
+ 35% Hazard +
+ 25% Regime +
+ 15% F25 +
+ 15% F50 +
+ 10% F100
+ </b>
+
+ <br><br>
+
+ Separação cronológica:
+ <b>70% DEV / 30% validação OOS</b>.
+
+ <br><br>
+
+ Os cortes dos regimes são calculados
+ exclusivamente no DEV e depois congelados.
+
+ <br><br>
+
+ <b>3067 permanece completamente fora.</b>
+
+ </p>
+
+ </div>
+ `;
+
+ document.getElementById("saida").innerHTML=html;
+
+ document.getElementById("saida").scrollIntoView({
+   behavior:"smooth"
+ });
+}
+
+</script>
+</body>
+</html>
