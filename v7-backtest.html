@@ -1,0 +1,727 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Mega Passos V7 — Backtest</title>
+
+<style>
+body{
+  font-family:Arial,sans-serif;
+  background:#07111f;
+  color:#fff;
+  margin:0;
+  padding:18px;
+}
+.container{max-width:950px;margin:auto}
+h1{font-size:34px}
+h2{font-size:28px;margin-top:35px}
+.card{
+  background:#131f31;
+  padding:22px;
+  border-radius:20px;
+  margin:20px 0;
+  overflow-x:auto;
+}
+textarea{
+  width:100%;
+  height:280px;
+  box-sizing:border-box;
+  background:#0d1726;
+  color:#fff;
+  border:2px solid #40506a;
+  border-radius:16px;
+  padding:14px;
+  font-size:16px;
+}
+button{
+  width:100%;
+  margin-top:18px;
+  padding:22px;
+  border:0;
+  border-radius:20px;
+  background:#83cf91;
+  color:#2865e8;
+  font-size:22px;
+  font-weight:bold;
+}
+table{
+  width:100%;
+  border-collapse:collapse;
+  margin-top:15px;
+}
+th,td{
+  padding:11px 8px;
+  border-bottom:1px solid #40506a;
+  text-align:center;
+  white-space:nowrap;
+}
+th{color:#9bd6a4}
+.good{color:#83cf91;font-weight:bold}
+.bad{color:#ff8585;font-weight:bold}
+.neutral{color:#ffd166;font-weight:bold}
+.info{color:#b7c0d0;line-height:1.55}
+.big{font-size:30px;font-weight:bold}
+</style>
+</head>
+
+<body>
+<div class="container">
+
+<h1>V7 — BACKTEST WALK-FORWARD</h1>
+
+<div class="card">
+
+<p class="info">
+Para cada concurso testado, a V7 será reconstruída usando
+somente os concursos anteriores. O resultado futuro nunca
+participa da classificação.
+</p>
+
+<textarea id="historico"
+placeholder="Cole aqui o histórico no mesmo formato:
+
+3066 04 06 09 13 28 48
+3065 08 10 30 38 50 53
+..."></textarea>
+
+<button onclick="executar()">
+EXECUTAR BACKTEST V7
+</button>
+
+</div>
+
+<div id="resultado"></div>
+
+</div>
+
+<script>
+
+function parse(txt){
+
+  const linhas=txt.trim().split(/\n+/);
+  const h=[];
+
+  for(const linha of linhas){
+
+    const x=linha.trim().split(/\s+/).map(Number);
+
+    if(x.length<7) continue;
+
+    const concurso=x[0];
+    const dezenas=x.slice(1,7);
+
+    if(
+      Number.isFinite(concurso) &&
+      dezenas.every(n=>n>=1&&n<=60) &&
+      new Set(dezenas).size===6
+    ){
+      h.push({concurso,dezenas});
+    }
+  }
+
+  h.sort((a,b)=>a.concurso-b.concurso);
+
+  return h;
+}
+
+function faixa(p){
+
+  if(p<=3) return "1–3";
+  if(p<=6) return "4–6";
+  if(p<=10) return "7–10";
+  if(p<=15) return "11–15";
+
+  return "16+";
+}
+
+function passosAtuais(hist){
+
+  const ultima={};
+
+  for(let n=1;n<=60;n++) ultima[n]=-1;
+
+  hist.forEach((c,i)=>{
+    c.dezenas.forEach(n=>ultima[n]=i);
+  });
+
+  const p={};
+
+  for(let n=1;n<=60;n++){
+
+    p[n]=
+      ultima[n]===-1
+      ? hist.length
+      : hist.length-ultima[n];
+  }
+
+  return p;
+}
+
+/*
+Aprendizado dos regimes.
+
+IMPORTANTE:
+o modelo recebe somente o histórico anterior
+ao concurso que será previsto.
+*/
+
+function regimes(hist){
+
+  const nomes=["1–3","4–6","7–10","11–15","16+"];
+
+  const d={};
+
+  nomes.forEach(f=>{
+    d[f]={n:0,a:0};
+  });
+
+  /*
+  Dentro do próprio treinamento também fazemos
+  reconstrução temporal.
+  */
+
+  const inicio=30;
+
+  for(let t=inicio;t<hist.length;t++){
+
+    const passado=hist.slice(0,t);
+
+    const p=passosAtuais(passado);
+
+    const real=new Set(hist[t].dezenas);
+
+    for(let n=1;n<=60;n++){
+
+      const f=faixa(p[n]);
+
+      d[f].n++;
+
+      if(real.has(n)) d[f].a++;
+    }
+  }
+
+  nomes.forEach(f=>{
+
+    /*
+    Prior centrado no baseline 10%.
+    */
+
+    d[f].taxa=
+      (d[f].a+2) /
+      (d[f].n+20);
+
+    d[f].lift=
+      d[f].taxa/0.10;
+  });
+
+  return d;
+}
+
+function individual(hist,n,passoAtual){
+
+  const pos=[];
+
+  hist.forEach((c,i)=>{
+    if(c.dezenas.includes(n)) pos.push(i);
+  });
+
+  const gaps=[];
+
+  for(let i=1;i<pos.length;i++){
+    gaps.push(pos[i]-pos[i-1]);
+  }
+
+  let chegou=0;
+  let saiu=0;
+
+  for(const g of gaps){
+
+    if(g>=passoAtual) chegou++;
+
+    if(g===passoAtual) saiu++;
+  }
+
+  return {
+    chegou,
+    saiu,
+    taxa:(saiu+1)/(chegou+10)
+  };
+}
+
+function rankingV7(hist){
+
+  const p=passosAtuais(hist);
+
+  const reg=regimes(hist);
+
+  const ranking=[];
+
+  for(let n=1;n<=60;n++){
+
+    const passo=p[n];
+
+    const f=faixa(passo);
+
+    const ind=individual(
+      hist,
+      n,
+      passo
+    );
+
+    const score=
+      Math.sqrt(
+        ind.taxa *
+        reg[f].taxa
+      );
+
+    ranking.push({
+      dez:n,
+      passo,
+      faixa:f,
+      score
+    });
+  }
+
+  ranking.sort((a,b)=>
+    b.score-a.score ||
+    a.dez-b.dez
+  );
+
+  return ranking;
+}
+
+function executar(){
+
+  const hist=parse(
+    document.getElementById("historico").value
+  );
+
+  const out=document.getElementById("resultado");
+
+  if(hist.length<50){
+
+    out.innerHTML=
+      '<div class="card">'+
+      'Use pelo menos 50 concursos.'+
+      '</div>';
+
+    return;
+  }
+
+  /*
+  Começamos no índice 30.
+
+  Isso significa que toda previsão possui
+  no mínimo 30 concursos anteriores.
+  */
+
+  const inicio=30;
+
+  const cortes=[6,10,15,20,25,30,40];
+
+  const soma={};
+
+  cortes.forEach(k=>soma[k]=0);
+
+  const dist={};
+
+  cortes.forEach(k=>{
+    dist[k]=Array(7).fill(0);
+  });
+
+  const registros=[];
+
+  /*
+  WALK-FORWARD REAL
+  */
+
+  for(let t=inicio;t<hist.length;t++){
+
+    const passado=hist.slice(0,t);
+
+    const alvo=hist[t];
+
+    const rank=rankingV7(passado);
+
+    const real=new Set(alvo.dezenas);
+
+    const linha={
+      concurso:alvo.concurso,
+      hits:{}
+    };
+
+    for(const k of cortes){
+
+      const top=
+        rank
+        .slice(0,k)
+        .map(x=>x.dez);
+
+      let hits=0;
+
+      for(const n of top){
+        if(real.has(n)) hits++;
+      }
+
+      soma[k]+=hits;
+
+      dist[k][hits]++;
+
+      linha.hits[k]=hits;
+    }
+
+    registros.push(linha);
+  }
+
+  const testes=registros.length;
+
+  let html='';
+
+  html+=`
+  <div class="card">
+
+  <h2>BACKTEST V7 CONCLUÍDO</h2>
+
+  <b>${hist.length}</b>
+  concursos reconhecidos.<br>
+
+  Intervalo:
+  <b>${hist[0].concurso}</b>
+  até
+  <b>${hist[hist.length-1].concurso}</b><br><br>
+
+  Testes walk-forward:
+  <b>${testes}</b>
+
+  </div>
+  `;
+
+  html+=`
+  <div class="card">
+
+  <h2>V7 × BASELINE ALEATÓRIO</h2>
+
+  <table>
+
+  <tr>
+  <th>Top</th>
+  <th>Média</th>
+  <th>Baseline</th>
+  <th>Dif.</th>
+  <th>Lift</th>
+  </tr>
+  `;
+
+  for(const k of cortes){
+
+    const media=soma[k]/testes;
+
+    /*
+    Esperança matemática:
+    seis dezenas sorteadas dentre sessenta.
+    */
+
+    const base=6*k/60;
+
+    const dif=media-base;
+
+    const lift=media/base;
+
+    const classe=
+      dif>0.05
+      ? "good"
+      : dif<-0.05
+      ? "bad"
+      : "neutral";
+
+    html+=`
+    <tr>
+
+    <td>Top ${k}</td>
+
+    <td>
+    ${media.toFixed(3)} / 6
+    </td>
+
+    <td>
+    ${base.toFixed(3)}
+    </td>
+
+    <td class="${classe}">
+    ${dif>=0?"+":""}${dif.toFixed(3)}
+    </td>
+
+    <td class="${classe}">
+    ${lift.toFixed(3)}×
+    </td>
+
+    </tr>
+    `;
+  }
+
+  html+=`
+  </table>
+  </div>
+  `;
+
+  /*
+  Distribuição Top 10
+  */
+
+  html+=`
+  <div class="card">
+
+  <h2>DISTRIBUIÇÃO — TOP 10</h2>
+
+  <table>
+
+  <tr>
+  <th>Acertos</th>
+  <th>Concursos</th>
+  <th>%</th>
+  </tr>
+  `;
+
+  for(let h=0;h<=6;h++){
+
+    const n=dist[10][h];
+
+    const pct=
+      100*n/testes;
+
+    html+=`
+    <tr>
+
+    <td>${h}/6</td>
+
+    <td>${n}</td>
+
+    <td>${pct.toFixed(1)}%</td>
+
+    </tr>
+    `;
+  }
+
+  html+=`
+  </table>
+  </div>
+  `;
+
+  /*
+  Melhores ocorrências do Top 10
+  */
+
+  let maxHit=
+    Math.max(
+      ...registros.map(r=>r.hits[10])
+    );
+
+  let melhores=
+    registros.filter(
+      r=>r.hits[10]===maxHit
+    );
+
+  html+=`
+  <div class="card">
+
+  <h2>MELHOR RESULTADO — TOP 10</h2>
+
+  <div class="big good">
+  ${maxHit}/6
+  </div>
+
+  <p>
+  Ocorrências:
+  <b>${melhores.length}</b>
+  </p>
+
+  <p class="info">
+  Concursos:
+  ${melhores
+    .slice(-20)
+    .map(x=>x.concurso)
+    .join(", ")}
+  </p>
+
+  </div>
+  `;
+
+  /*
+  Janelas recentes.
+
+  Aqui NÃO recalculamos o modelo usando futuro.
+  Apenas avaliamos os últimos resultados
+  walk-forward já produzidos.
+  */
+
+  const janelas=[25,50,100];
+
+  html+=`
+  <div class="card">
+
+  <h2>ESTABILIDADE — TOP 10</h2>
+
+  <table>
+
+  <tr>
+  <th>Janela</th>
+  <th>Testes</th>
+  <th>Média</th>
+  <th>Baseline</th>
+  <th>Dif.</th>
+  </tr>
+  `;
+
+  for(const j of janelas){
+
+    const arr=
+      registros.slice(
+        -Math.min(j,registros.length)
+      );
+
+    const media=
+      arr.reduce(
+        (s,r)=>s+r.hits[10],
+        0
+      ) / arr.length;
+
+    const dif=media-1;
+
+    const classe=
+      dif>0.05
+      ? "good"
+      : dif<-0.05
+      ? "bad"
+      : "neutral";
+
+    html+=`
+    <tr>
+
+    <td>Últimos ${j}</td>
+
+    <td>${arr.length}</td>
+
+    <td>
+    ${media.toFixed(3)}
+    </td>
+
+    <td>1.000</td>
+
+    <td class="${classe}">
+    ${dif>=0?"+":""}${dif.toFixed(3)}
+    </td>
+
+    </tr>
+    `;
+  }
+
+  /*
+  Histórico total disponível.
+  */
+
+  const mediaTotal=
+    soma[10]/testes;
+
+  const difTotal=
+    mediaTotal-1;
+
+  html+=`
+  <tr>
+
+  <td>Histórico disponível</td>
+
+  <td>${testes}</td>
+
+  <td>
+  ${mediaTotal.toFixed(3)}
+  </td>
+
+  <td>1.000</td>
+
+  <td class="${
+    difTotal>0.05
+    ?"good"
+    :difTotal<-0.05
+    ?"bad"
+    :"neutral"
+  }">
+
+  ${difTotal>=0?"+":""}
+  ${difTotal.toFixed(3)}
+
+  </td>
+
+  </tr>
+
+  </table>
+  </div>
+  `;
+
+  /*
+  Últimos concursos individualmente.
+  */
+
+  html+=`
+  <div class="card">
+
+  <h2>ÚLTIMOS TESTES — TOP 10</h2>
+
+  <table>
+
+  <tr>
+  <th>Concurso</th>
+  <th>Acertos</th>
+  </tr>
+  `;
+
+  registros
+    .slice(-20)
+    .reverse()
+    .forEach(r=>{
+
+      html+=`
+      <tr>
+
+      <td>${r.concurso}</td>
+
+      <td>
+      <b>${r.hits[10]}/6</b>
+      </td>
+
+      </tr>
+      `;
+    });
+
+  html+=`
+  </table>
+  </div>
+  `;
+
+  html+=`
+  <div class="card">
+
+  <h2>CRITÉRIO DE DECISÃO</h2>
+
+  <p class="info">
+
+  Não basta a V7 superar o baseline em uma única janela.
+
+  Procuraremos desempenho acima do aleatório principalmente
+  no Top 10 e consistência entre as janelas de 25, 50,
+  100 concursos e o histórico disponível.
+
+  Um resultado isolado não será tratado como evidência
+  suficiente de capacidade preditiva.
+
+  </p>
+
+  </div>
+  `;
+
+  out.innerHTML=html;
+}
+
+</script>
+</body>
+</html>
