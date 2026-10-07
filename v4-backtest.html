@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Mega Passos V4 - Backtest</title>
+<style>
+body{font-family:Arial,sans-serif;background:#07111f;color:white;margin:0;padding:18px}
+.container{max-width:1000px;margin:auto}
+textarea{width:100%;height:280px;box-sizing:border-box;background:#111d2e;color:white;border:2px solid #43516a;border-radius:15px;padding:14px;font-size:16px}
+button{width:100%;padding:19px;margin-top:15px;background:#7fd18e;border:0;border-radius:15px;font-size:21px;font-weight:bold}
+.card{background:#111d2e;border-radius:16px;padding:17px;margin-top:18px}
+.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}
+.metric{background:#172438;padding:15px;border-radius:14px}
+.valor{font-size:26px;font-weight:bold;color:#7fd18e}
+.pos{color:#7fd18e;font-weight:bold}
+.neg{color:#ff8d8d;font-weight:bold}
+.neutro{color:#ffd166;font-weight:bold}
+.sub{color:#aeb9c9;line-height:1.45}
+select{width:100%;padding:12px;background:#111d2e;color:white;border:1px solid #43516a;border-radius:10px;font-size:16px}
+.scroll{overflow-x:auto}
+table{width:100%;border-collapse:collapse;white-space:nowrap}
+th,td{padding:9px 6px;border-bottom:1px solid #334156;text-align:center}
+th{color:#9fe2b4}
+</style>
+</head>
+
+<body>
+<div class="container">
+
+<h1>MEGA PASSOS V4 — BACKTEST</h1>
+
+<p class="sub">
+Backtest walk-forward do Consenso V2 × V3.
+Cada concurso é previsto somente com os concursos anteriores.
+</p>
+
+<textarea id="historico" placeholder="Cole o histórico completo..."></textarea>
+
+<div class="card">
+<b>Histórico mínimo</b><br><br>
+<select id="minHist">
+<option value="25">25 concursos</option>
+<option value="50" selected>50 concursos</option>
+<option value="75">75 concursos</option>
+<option value="100">100 concursos</option>
+</select>
+</div>
+
+<button onclick="executar()">EXECUTAR BACKTEST V4</button>
+
+<div id="status" class="card">Aguardando histórico...</div>
+
+<div id="saida" style="display:none">
+
+<h2>V4 × BASELINE ALEATÓRIO</h2>
+<div id="cards" class="grid"></div>
+
+<div class="card">
+<h2>Distribuição Top 10</h2>
+<div id="dist"></div>
+</div>
+
+<div class="card">
+<h2>Melhores resultados Top 10</h2>
+<div id="melhores"></div>
+</div>
+
+<div class="card">
+<h2>Concurso a concurso</h2>
+<div class="scroll">
+<table>
+<thead>
+<tr>
+<th>Concurso</th>
+<th>Resultado</th>
+<th>Posições</th>
+<th>T6</th>
+<th>T10</th>
+<th>T15</th>
+<th>T20</th>
+<th>T25</th>
+<th>T30</th>
+<th>T40</th>
+</tr>
+</thead>
+<tbody id="tabela"></tbody>
+</table>
+</div>
+</div>
+
+</div>
+</div>
+
+<script>
+function mediana(a){
+ if(!a.length)return 0;
+ const x=[...a].sort((a,b)=>a-b);
+ const m=Math.floor(x.length/2);
+ return x.length%2?x[m]:(x[m-1]+x[m])/2;
+}
+
+function moda(a){
+ if(!a.length)return 0;
+ const f={}; a.forEach(x=>f[x]=(f[x]||0)+1);
+ let melhor=a[0],mx=0;
+ Object.keys(f).forEach(k=>{
+  if(f[k]>mx){mx=f[k];melhor=Number(k);}
+ });
+ return melhor;
+}
+
+function parseHistorico(texto){
+ const mapa=new Map();
+
+ texto.trim().split(/\n+/).forEach(l=>{
+  const n=l.trim().split(/\s+/).map(Number);
+
+  if(n.length>=7){
+   const concurso=n[0];
+   const dezenas=n.slice(1,7);
+
+   if(Number.isInteger(concurso) &&
+      dezenas.every(x=>Number.isInteger(x)&&x>=1&&x<=60) &&
+      new Set(dezenas).size===6){
+     mapa.set(concurso,{concurso,dezenas});
+   }
+  }
+ });
+
+ return [...mapa.values()].sort((a,b)=>a.concurso-b.concurso);
+}
+
+/* V2 CONGELADA */
+function rankingV2(concursos){
+ let ranking=[];
+
+ for(let dez=1;dez<=60;dez++){
+  let ap=[];
+
+  concursos.forEach((c,i)=>{
+   if(c.dezenas.includes(dez))ap.push(i);
+  });
+
+  let passos=[];
+  for(let i=1;i<ap.length;i++)passos.push(ap[i]-ap[i-1]);
+
+  const atual=ap.length ? concursos.length-ap[ap.length-1] : concursos.length;
+  const media=passos.length ? passos.reduce((a,b)=>a+b,0)/passos.length : 0;
+  const med=mediana(passos);
+  const mod=moda(passos);
+  const min=passos.length?Math.min(...passos):0;
+  const max=passos.length?Math.max(...passos):0;
+
+  const score=
+   (100/(1+Math.abs(atual-media)))*.40+
+   (100/(1+Math.abs(atual-med)))*.30+
+   (100/(1+Math.abs(atual-mod)))*.20+
+   ((passos.length&&atual>=min&&atual<=max)?100:0)*.10;
+
+  ranking.push({dez,score});
+ }
+
+ ranking.sort((a,b)=>b.score-a.score||a.dez-b.dez);
+ return ranking;
+}
+
+/* V3 CONGELADA */
+function rankingV3(concursos){
+ let ranking=[];
+
+ for(let dez=1;dez<=60;dez++){
+  let ap=[];
+
+  concursos.forEach((c,i)=>{
+   if(c.dezenas.includes(dez))ap.push(i);
+  });
+
+  let passos=[];
+  for(let i=1;i<ap.length;i++)passos.push(ap[i]-ap[i-1]);
+
+  const atual=ap.length ? concursos.length-ap[ap.length-1] : concursos.length;
+  const chegou=passos.filter(p=>p>=atual).length;
+  const saiu=passos.filter(p=>p===atual).length;
+
+  const taxaAjust=(saiu+1)/(chegou+10);
+
+  const f25=concursos.slice(-25).filter(c=>c.dezenas.includes(dez)).length;
+  const f50=concursos.slice(-50).filter(c=>c.dezenas.includes(dez)).length;
+  const confianca=Math.min(1,chegou/10);
+
+  const score=
+   taxaAjust*100*.70+
+   confianca*100*.15+
+   Math.min(100,(f25/10)*100)*.10+
+   Math.min(100,(f50/20)*100)*.05;
+
+  ranking.push({dez,score});
+ }
+
+ ranking.sort((a,b)=>b.score-a.score||a.dez-b.dez);
+ return ranking;
+}
+
+/* V4 CONGELADA */
+function consensoV4(concursos){
+ const r2=rankingV2(concursos);
+ const r3=rankingV3(concursos);
+
+ const p2={},p3={};
+ r2.forEach((r,i)=>p2[r.dez]=i+1);
+ r3.forEach((r,i)=>p3[r.dez]=i+1);
+
+ let final=[];
+
+ for(let dez=1;dez<=60;dez++){
+  const a=p2[dez];
+  const b=p3[dez];
+  const diferenca=Math.abs(a-b);
+
+  let bonus=0;
+  if(a<=10&&b<=10)bonus=12;
+  else if(a<=15&&b<=15)bonus=8;
+  else if(a<=20&&b<=20)bonus=4;
+
+  const score=(61-a)+(61-b)+bonus-diferenca*.10;
+
+  final.push({dez,score});
+ }
+
+ final.sort((a,b)=>b.score-a.score||a.dez-b.dez);
+ return final;
+}
+
+function executar(){
+ const concursos=parseHistorico(document.getElementById("historico").value);
+ const minHist=Number(document.getElementById("minHist").value);
+
+ if(concursos.length<=minHist){
+  document.getElementById("status").innerHTML="Histórico insuficiente.";
+  return;
+ }
+
+ const cortes=[6,10,15,20,25,30,40];
+ const soma={};
+ cortes.forEach(k=>soma[k]=0);
+
+ let resultados=[];
+
+ for(let i=minHist;i<concursos.length;i++){
+  const passado=concursos.slice(0,i);
+  const alvo=concursos[i];
+
+  const ranking=consensoV4(passado);
+  const ordem=ranking.map(r=>r.dez);
+
+  const posicoes=alvo.dezenas.map(d=>ordem.indexOf(d)+1);
+  const acertos={};
+
+  cortes.forEach(k=>{
+   const top=ordem.slice(0,k);
+   acertos[k]=alvo.dezenas.filter(d=>top.includes(d)).length;
+   soma[k]+=acertos[k];
+  });
+
+  resultados.push({
+   concurso:alvo.concurso,
+   dezenas:alvo.dezenas,
+   posicoes,
+   acertos
+  });
+ }
+
+ const qtd=resultados.length;
+
+ document.getElementById("status").innerHTML=
+ `<b>BACKTEST V4 CONCLUÍDO</b><br>
+ ${concursos.length} concursos reconhecidos.<br>
+ Intervalo: ${concursos[0].concurso} até ${concursos[concursos.length-1].concurso}.<br>
+ Concursos testados: <b>${qtd}</b>.`;
+
+ let cards="";
+
+ cortes.forEach(k=>{
+  const observado=soma[k]/qtd;
+  const baseline=6*k/60;
+  const delta=observado-baseline;
+
+  const classe=delta>0.0001?"pos":delta<-0.0001?"neg":"neutro";
+  const sinal=delta>0?"+":"";
+
+  cards+=`
+  <div class="metric">
+   <b>Top ${k}</b><br>
+   <span class="valor">${observado.toFixed(3)} / 6</span>
+   <br><br>
+   Baseline: ${baseline.toFixed(3)}<br>
+   Diferença:
+   <span class="${classe}">${sinal}${delta.toFixed(3)}</span>
+  </div>`;
+ });
+
+ document.getElementById("cards").innerHTML=cards;
+
+ let dist="";
+ for(let a=0;a<=6;a++){
+  const n=resultados.filter(r=>r.acertos[10]===a).length;
+  dist+=`${a}/6: <b>${n}</b> concursos (${(100*n/qtd).toFixed(1)}%)<br>`;
+ }
+ document.getElementById("dist").innerHTML=dist;
+
+ const ordenados=[...resultados].sort((a,b)=>
+  b.acertos[10]-a.acertos[10] ||
+  b.acertos[15]-a.acertos[15] ||
+  b.acertos[20]-a.acertos[20]
+ );
+
+ const max10=ordenados[0].acertos[10];
+ const ocorr=resultados.filter(r=>r.acertos[10]===max10).length;
+
+ let melhores=`<b>Melhor Top 10: ${max10}/6 — ${ocorr} ocorrência(s)</b><br><br>`;
+
+ ordenados.slice(0,15).forEach(r=>{
+  melhores+=`
+  Concurso <b>${r.concurso}</b> —
+  ${r.dezenas.map(d=>String(d).padStart(2,"0")).join("-")}
+  — <span class="pos">T10 ${r.acertos[10]}/6</span>
+  — posições ${r.posicoes.join(", ")}<br><br>`;
+ });
+
+ document.getElementById("melhores").innerHTML=melhores;
+
+ const tbody=document.getElementById("tabela");
+ tbody.innerHTML="";
+
+ [...resultados].reverse().forEach(r=>{
+  const tr=document.createElement("tr");
+
+  tr.innerHTML=`
+  <td>${r.concurso}</td>
+  <td>${r.dezenas.map(d=>String(d).padStart(2,"0")).join("-")}</td>
+  <td>${r.posicoes.join(",")}</td>
+  <td>${r.acertos[6]}</td>
+  <td>${r.acertos[10]}</td>
+  <td>${r.acertos[15]}</td>
+  <td>${r.acertos[20]}</td>
+  <td>${r.acertos[25]}</td>
+  <td>${r.acertos[30]}</td>
+  <td>${r.acertos[40]}</td>`;
+
+  tbody.appendChild(tr);
+ });
+
+ document.getElementById("saida").style.display="block";
+}
+</script>
+</body>
+</html>
