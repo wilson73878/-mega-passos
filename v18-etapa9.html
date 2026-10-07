@@ -1,0 +1,871 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Mega Passos V18 — Etapa 9</title>
+
+<style>
+*{box-sizing:border-box}
+body{
+ margin:0;background:#07111f;color:#f4f7fb;
+ font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif
+}
+.container{max-width:1000px;margin:auto;padding:24px 18px 80px}
+h1{font-size:34px;margin-bottom:8px}
+h2{font-size:25px;margin-top:0}
+.sub{color:#aab6c9;line-height:1.55}
+.card{
+ background:#152136;border-radius:24px;
+ padding:24px;margin-top:22px;overflow:auto
+}
+textarea{
+ width:100%;height:300px;background:#0b1628;color:white;
+ border:2px solid #43516b;border-radius:18px;
+ padding:16px;font-size:15px
+}
+button{
+ width:100%;margin-top:18px;padding:20px;border:0;
+ border-radius:20px;background:#86d292;color:#1264ef;
+ font-weight:800;font-size:21px
+}
+button:disabled{opacity:.55}
+table{
+ width:100%;border-collapse:collapse;min-width:780px
+}
+th,td{
+ padding:11px 8px;border-bottom:1px solid #43516b;
+ text-align:center;white-space:nowrap
+}
+th{color:#9bd5a3}
+.good{color:#86d292;font-weight:800}
+.bad{color:#ff8989;font-weight:800}
+.warn{color:#ffd06c;font-weight:800}
+.metric{font-size:30px;font-weight:900}
+.progress{
+ height:17px;background:#26354b;
+ border-radius:10px;overflow:hidden;margin-top:14px
+}
+.bar{height:100%;width:0;background:#86d292}
+</style>
+</head>
+
+<body>
+<div class="container">
+
+<h1>MEGA PASSOS V18 — ETAPA 9</h1>
+
+<p class="sub">
+Validação histórica ampliada do M5 congelado.
+Nenhum peso será otimizado.
+</p>
+
+<div class="card">
+
+<h2>Histórico completo</h2>
+
+<p class="sub">
+Cole os concursos <b>1 até 3066</b>.<br>
+Formato: concurso + seis dezenas.<br>
+<b>Não inclua 3067.</b>
+</p>
+
+<textarea id="dados"
+placeholder="1 04 05 30 33 41 52
+2 ...
+...
+3066 04 06 09 13 28 48"></textarea>
+
+<button id="btn" onclick="iniciar()">
+EXECUTAR V18 — VALIDAÇÃO AMPLIADA
+</button>
+
+</div>
+
+<div id="status"></div>
+<div id="saida"></div>
+
+</div>
+
+<script>
+
+/* ============================
+   PARSER
+============================ */
+
+function parseDados(txt){
+
+ let arr=[];
+
+ for(const l of txt.trim().split(/\n+/)){
+
+   const n=l.trim().split(/\s+/).map(Number);
+
+   if(n.length<7) continue;
+
+   const concurso=n[0];
+   const dezenas=n.slice(1,7);
+
+   if(!Number.isInteger(concurso)) continue;
+   if(new Set(dezenas).size!==6) continue;
+   if(dezenas.some(x=>x<1||x>60)) continue;
+
+   arr.push({concurso,dezenas});
+ }
+
+ arr.sort((a,b)=>a.concurso-b.concurso);
+
+ return arr;
+}
+
+/* ============================
+   M5 ORIGINAL — CONGELADO
+============================ */
+
+function passoAtual(hist,d){
+
+ for(let i=hist.length-1;i>=0;i--){
+
+   if(hist[i].dezenas.includes(d))
+     return hist.length-i;
+ }
+
+ return hist.length+1;
+}
+
+function freq(hist,d,n){
+
+ const h=n>=hist.length ? hist : hist.slice(-n);
+
+ if(!h.length) return 0;
+
+ let c=0;
+
+ for(const x of h)
+   if(x.dezenas.includes(d))
+     c++;
+
+ return c/h.length;
+}
+
+function gaps(hist,d){
+
+ let p=[];
+
+ hist.forEach((x,i)=>{
+   if(x.dezenas.includes(d))
+     p.push(i);
+ });
+
+ let g=[];
+
+ for(let i=1;i<p.length;i++)
+   g.push(p[i]-p[i-1]);
+
+ return g;
+}
+
+function hazard(hist,d){
+
+ const p=passoAtual(hist,d);
+ const gs=gaps(hist,d);
+
+ if(!gs.length)
+   return .10;
+
+ let chegou=0;
+ let saiu=0;
+
+ for(const g of gs){
+
+   if(g>=p) chegou++;
+   if(g===p) saiu++;
+ }
+
+ return (saiu+1)/(chegou+10);
+}
+
+function faixa(p){
+
+ if(p<=3) return 0;
+ if(p<=6) return 1;
+ if(p<=10) return 2;
+ if(p<=15) return 3;
+
+ return 4;
+}
+
+function aprenderRegimes(hist){
+
+ let n=[0,0,0,0,0];
+ let ac=[0,0,0,0,0];
+
+ for(let t=30;t<hist.length;t++){
+
+   const passado=hist.slice(0,t);
+   const real=new Set(hist[t].dezenas);
+
+   for(let d=1;d<=60;d++){
+
+     const f=
+       faixa(
+         passoAtual(passado,d)
+       );
+
+     n[f]++;
+
+     if(real.has(d))
+       ac[f]++;
+   }
+ }
+
+ return n.map((x,i)=>{
+
+   const taxa=(ac[i]+2)/(x+20);
+
+   return {
+     n:x,
+     ac:ac[i],
+     taxa,
+     lift:taxa/.10
+   };
+ });
+}
+
+function scoreM5(hist,d,regimes){
+
+ const p=passoAtual(hist,d);
+ const hz=hazard(hist,d);
+
+ return (
+   hz*.35 +
+   regimes[faixa(p)].lift*.25 +
+   freq(hist,d,25)*.15 +
+   freq(hist,d,50)*.15 +
+   freq(hist,d,100)*.10
+ );
+}
+
+function rankingM5(hist){
+
+ const regimes=aprenderRegimes(hist);
+
+ let r=[];
+
+ for(let d=1;d<=60;d++){
+
+   r.push({
+     d,
+     score:scoreM5(hist,d,regimes)
+   });
+ }
+
+ r.sort(
+   (a,b)=>
+   b.score-a.score ||
+   a.d-b.d
+ );
+
+ return r;
+}
+
+function hits(rank,real,k){
+
+ const top=
+   new Set(
+     rank.slice(0,k).map(x=>x.d)
+   );
+
+ let n=0;
+
+ for(const d of real)
+   if(top.has(d))
+     n++;
+
+ return n;
+}
+
+/* ============================
+   COMBINAÇÕES / BASELINE
+============================ */
+
+function comb(n,k){
+
+ if(k<0||k>n) return 0;
+ if(k===0||k===n) return 1;
+
+ k=Math.min(k,n-k);
+
+ let r=1;
+
+ for(let i=1;i<=k;i++)
+   r=r*(n-k+i)/i;
+
+ return r;
+}
+
+function probAleatoria(k,x){
+
+ return (
+   comb(k,x)*
+   comb(60-k,6-x)
+ )/
+ comb(60,6);
+}
+
+/* ============================
+   AUDITORIA WALK-FORWARD
+============================ */
+
+function criarAcumulador(){
+
+ return {
+   n:0,
+   soma:{
+     6:0,10:0,15:0,20:0,
+     25:0,30:0,40:0
+   },
+   dist:[0,0,0,0,0,0,0]
+ };
+}
+
+function registrar(acc,rank,real){
+
+ const ks=[6,10,15,20,25,30,40];
+
+ let h10=0;
+
+ for(const k of ks){
+
+   const h=hits(rank,real,k);
+
+   acc.soma[k]+=h;
+
+   if(k===10)
+     h10=h;
+ }
+
+ acc.dist[h10]++;
+ acc.n++;
+}
+
+function medias(acc){
+
+ let r={};
+
+ for(const k of [6,10,15,20,25,30,40])
+   r[k]=acc.soma[k]/acc.n;
+
+ return r;
+}
+
+/*
+Blocos cronológicos de 500 testes.
+Não são usados para treinar nada.
+Servem apenas para verificar estabilidade.
+*/
+
+async function auditar(hist){
+
+ let global=criarAcumulador();
+ let blocos=[];
+
+ let atual=criarAcumulador();
+
+ let blocoInicio=null;
+ let blocoFim=null;
+
+ const inicio=100;
+
+ for(let t=inicio;t<hist.length;t++){
+
+   const passado=hist.slice(0,t);
+
+   const rank=rankingM5(passado);
+
+   const real=new Set(hist[t].dezenas);
+
+   if(blocoInicio===null)
+     blocoInicio=hist[t].concurso;
+
+   blocoFim=hist[t].concurso;
+
+   registrar(global,rank,real);
+   registrar(atual,rank,real);
+
+   if(atual.n===500){
+
+     blocos.push({
+       inicio:blocoInicio,
+       fim:blocoFim,
+       acc:atual
+     });
+
+     atual=criarAcumulador();
+     blocoInicio=null;
+   }
+
+   if((t-inicio)%25===0){
+
+     const pct=
+       (t-inicio+1)/
+       (hist.length-inicio);
+
+     document.getElementById("bar").style.width=
+       (pct*100)+"%";
+
+     document.getElementById("ptxt").innerText=
+       `Validando concurso ${hist[t].concurso} de ${hist.at(-1).concurso}`;
+
+     await new Promise(r=>setTimeout(r,0));
+   }
+ }
+
+ if(atual.n>0){
+
+   blocos.push({
+     inicio:blocoInicio,
+     fim:blocoFim,
+     acc:atual
+   });
+ }
+
+ return {global,blocos};
+}
+
+/* ============================
+   ESTATÍSTICA
+============================ */
+
+function estatisticaTop10(acc){
+
+ const media=
+   acc.soma[10]/acc.n;
+
+ const variancia=
+   6*
+   (10/60)*
+   (1-10/60)*
+   ((60-6)/(60-1));
+
+ const ep=
+   Math.sqrt(
+     variancia/acc.n
+   );
+
+ const z=
+   (media-1)/ep;
+
+ return {
+   media,
+   ep,
+   z,
+   inf:media-1.96*ep,
+   sup:media+1.96*ep
+ };
+}
+
+function fmt(x,n=3){
+ return Number(x).toFixed(n);
+}
+
+function pct(x){
+ return (x*100).toFixed(2)+"%";
+}
+
+/* ============================
+   EXECUÇÃO
+============================ */
+
+async function iniciar(){
+
+ const btn=document.getElementById("btn");
+
+ btn.disabled=true;
+
+ const hist=
+   parseDados(
+     document.getElementById("dados").value
+   );
+
+ if(hist.length<1000){
+
+   alert(
+     "Para a V18 use o histórico ampliado. Foram reconhecidos apenas "+
+     hist.length+" concursos."
+   );
+
+   btn.disabled=false;
+   return;
+ }
+
+ /*
+ Proteção explícita contra 3067.
+ */
+
+ if(hist.some(x=>x.concurso>=3067)){
+
+   alert(
+     "A V18 deve terminar no concurso 3066. Remova o 3067 ou qualquer concurso posterior."
+   );
+
+   btn.disabled=false;
+   return;
+ }
+
+ document.getElementById("status").innerHTML=`
+
+ <div class="card">
+
+ <h2>PROCESSANDO V18...</h2>
+
+ <p id="ptxt" class="sub">
+ Preparando validação histórica ampliada.
+ </p>
+
+ <div class="progress">
+ <div class="bar" id="bar"></div>
+ </div>
+
+ </div>
+ `;
+
+ const resultado=
+   await auditar(hist);
+
+ document.getElementById("bar").style.width="100%";
+
+ mostrar(hist,resultado);
+
+ btn.disabled=false;
+}
+
+/* ============================
+   RESULTADOS
+============================ */
+
+function mostrar(hist,r){
+
+ const global=r.global;
+ const m=medias(global);
+ const e=estatisticaTop10(global);
+
+ let html=`
+
+ <div class="card">
+
+ <h2>ETAPA 9 CONCLUÍDA</h2>
+
+ <p>
+
+ Histórico:
+ <b>
+ ${hist[0].concurso}–
+ ${hist.at(-1).concurso}
+ </b>
+ <br>
+
+ Concursos carregados:
+ <b>${hist.length}</b>
+ <br>
+
+ Testes walk-forward:
+ <b>${global.n}</b>
+
+ </p>
+
+ </div>
+
+ <div class="card">
+
+ <h2>M5 — VALIDAÇÃO GLOBAL</h2>
+
+ <table>
+
+ <tr>
+ <th>Grupo</th>
+ <th>M5</th>
+ <th>Aleatório</th>
+ <th>Δ</th>
+ </tr>
+ `;
+
+ for(const k of [6,10,15,20,25,30,40]){
+
+   const base=k/10;
+   const d=m[k]-base;
+
+   html+=`
+
+   <tr>
+
+   <td>Top ${k}</td>
+
+   <td><b>${fmt(m[k])}</b></td>
+
+   <td>${fmt(base)}</td>
+
+   <td class="${
+     d>.02?"good":
+     d<-.02?"bad":
+     "warn"
+   }">
+
+   ${d>=0?"+":""}${fmt(d)}
+
+   </td>
+
+   </tr>
+   `;
+ }
+
+ html+=`
+ </table>
+ </div>
+
+ <div class="card">
+
+ <h2>TOP 10 — SIGNIFICÂNCIA</h2>
+
+ <table>
+
+ <tr>
+ <th>Métrica</th>
+ <th>Resultado</th>
+ </tr>
+
+ <tr>
+ <td>Média M5</td>
+ <td><b>${fmt(e.media)}</b></td>
+ </tr>
+
+ <tr>
+ <td>Baseline</td>
+ <td>1.000</td>
+ </tr>
+
+ <tr>
+ <td>Δ</td>
+ <td>
+ <b>
+ ${e.media>=1?"+":""}${fmt(e.media-1)}
+ </b>
+ </td>
+ </tr>
+
+ <tr>
+ <td>Erro-padrão</td>
+ <td>${fmt(e.ep,4)}</td>
+ </tr>
+
+ <tr>
+ <td>Z-score</td>
+ <td><b>${fmt(e.z,2)}</b></td>
+ </tr>
+
+ <tr>
+ <td>IC 95%</td>
+ <td>
+ ${fmt(e.inf)} – ${fmt(e.sup)}
+ </td>
+ </tr>
+
+ </table>
+
+ </div>
+
+ <div class="card">
+
+ <h2>ESTABILIDADE POR ERA</h2>
+
+ <table>
+
+ <tr>
+ <th>Era</th>
+ <th>Concursos</th>
+ <th>N</th>
+ <th>Top6</th>
+ <th>Top10</th>
+ <th>Top15</th>
+ <th>Top20</th>
+ </tr>
+ `;
+
+ r.blocos.forEach((b,i)=>{
+
+   const bm=medias(b.acc);
+
+   html+=`
+
+   <tr>
+
+   <td>E${i+1}</td>
+
+   <td>
+   ${b.inicio}–${b.fim}
+   </td>
+
+   <td>${b.acc.n}</td>
+
+   <td>${fmt(bm[6])}</td>
+
+   <td class="${
+     bm[10]>1?"good":
+     bm[10]<1?"bad":
+     "warn"
+   }">
+   <b>${fmt(bm[10])}</b>
+   </td>
+
+   <td>${fmt(bm[15])}</td>
+
+   <td>${fmt(bm[20])}</td>
+
+   </tr>
+   `;
+ });
+
+ html+=`
+ </table>
+ </div>
+
+ <div class="card">
+
+ <h2>DISTRIBUIÇÃO TOP 10</h2>
+
+ <table>
+
+ <tr>
+ <th>Acertos</th>
+ <th>M5</th>
+ <th>M5 %</th>
+ <th>Aleatório %</th>
+ <th>Esperado</th>
+ </tr>
+ `;
+
+ for(let x=0;x<=6;x++){
+
+   const p=probAleatoria(10,x);
+
+   html+=`
+
+   <tr>
+
+   <td>${x}/6</td>
+
+   <td>${global.dist[x]}</td>
+
+   <td>
+   ${pct(global.dist[x]/global.n)}
+   </td>
+
+   <td>${pct(p)}</td>
+
+   <td>
+   ${fmt(p*global.n,1)}
+   </td>
+
+   </tr>
+   `;
+ }
+
+ html+=`
+ </table>
+ </div>
+
+ <div class="card">
+
+ <h2>DIAGNÓSTICO</h2>
+
+ <div class="metric">
+
+ ${
+   e.inf>1
+   ?
+   "M5 ACIMA DO BASELINE"
+   :
+   e.sup<1
+   ?
+   "M5 ABAIXO DO BASELINE"
+   :
+   "SEM EVIDÊNCIA ESTATÍSTICA"
+ }
+
+ </div>
+
+ <p class="sub">
+
+ ${
+   e.inf>1
+   ?
+   `O intervalo de confiança de 95%
+   ficou totalmente acima de 1,000.
+   O próximo passo será verificar
+   estabilidade temporal e possíveis
+   efeitos de desenvolvimento do modelo.`
+   :
+   e.sup<1
+   ?
+   `O intervalo ficou abaixo do baseline.
+   O M5 não demonstrou vantagem histórica
+   nesta validação ampliada.`
+   :
+   `O intervalo ainda contém 1,000.
+   Mesmo com o histórico ampliado,
+   não há evidência suficiente para
+   distinguir o M5 do baseline aleatório.`
+ }
+
+ </p>
+
+ </div>
+
+ <div class="card">
+
+ <h2>CONTROLE DA ETAPA 9</h2>
+
+ <p class="sub">
+
+ M5 permanece exatamente:
+ <br><br>
+
+ <b>
+ 35% Hazard +
+ 25% Regime +
+ 15% F25 +
+ 15% F50 +
+ 10% F100
+ </b>
+
+ <br><br>
+
+ Nenhum peso foi otimizado com o
+ histórico ampliado.
+
+ <br><br>
+
+ Walk-forward inicia após 100 concursos
+ de histórico disponível.
+
+ <br><br>
+
+ <b>
+ O concurso 3067 permanece reservado.
+ </b>
+
+ </p>
+
+ </div>
+ `;
+
+ document.getElementById("saida").innerHTML=html;
+
+ document.getElementById("saida").scrollIntoView({
+   behavior:"smooth"
+ });
+}
+
+</script>
+</body>
+</html>
