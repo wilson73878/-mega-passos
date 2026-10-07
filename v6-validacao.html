@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Mega Passos V6 - Validação</title>
+
+<style>
+body{
+  font-family:Arial,sans-serif;
+  background:#07111f;color:#fff;
+  margin:0;padding:18px
+}
+.container{max-width:950px;margin:auto}
+h1{font-size:34px}
+h2{font-size:27px;margin-top:30px}
+textarea{
+  width:100%;height:300px;box-sizing:border-box;
+  background:#111d30;color:#fff;border:2px solid #42516a;
+  border-radius:16px;padding:15px;font-size:16px
+}
+button{
+  width:100%;margin-top:18px;padding:22px;border:0;
+  border-radius:16px;background:#82cf91;color:#1738e8;
+  font-size:22px;font-weight:bold
+}
+.card{
+  background:#121e31;padding:20px;border-radius:18px;
+  margin-top:20px;overflow-x:auto
+}
+table{width:100%;border-collapse:collapse;margin-top:15px}
+th,td{
+  padding:10px 7px;border-bottom:1px solid #435067;
+  text-align:center;white-space:nowrap
+}
+th{color:#9bd6a6}
+.good{color:#82cf91;font-weight:bold}
+.bad{color:#ff8585;font-weight:bold}
+.neutral{color:#ffd36a;font-weight:bold}
+.small{color:#aeb8ca;line-height:1.5}
+</style>
+</head>
+
+<body>
+<div class="container">
+
+<h1>MEGA PASSOS V6</h1>
+
+<p class="small">
+Validação temporal da V3. O objetivo desta etapa não é criar
+uma nova previsão, mas verificar se o desempenho observado
+permanece estável em diferentes períodos.
+</p>
+
+<textarea id="historico"
+placeholder="Cole o histórico:
+3067 01 04 17 33 41 52
+3066 04 06 09 13 28 48"></textarea>
+
+<button onclick="analisar()">EXECUTAR VALIDAÇÃO V6</button>
+
+<div id="resultado"></div>
+
+</div>
+
+<script>
+
+function parseHistorico(txt){
+  let linhas=txt.trim().split(/\n+/);
+  let concursos=[];
+
+  for(let linha of linhas){
+    let x=linha.trim().split(/\s+/).map(Number);
+    if(x.length<7) continue;
+
+    let c=x[0];
+    let d=x.slice(1,7);
+
+    if(!Number.isInteger(c)) continue;
+    if(new Set(d).size!==6) continue;
+    if(!d.every(n=>n>=1&&n<=60)) continue;
+
+    concursos.push({concurso:c,dezenas:d});
+  }
+
+  concursos.sort((a,b)=>a.concurso-b.concurso);
+  return concursos;
+}
+
+function passoAtual(hist,n){
+  for(let i=hist.length-1;i>=0;i--){
+    if(hist[i].dezenas.includes(n)){
+      return hist.length-i;
+    }
+  }
+  return hist.length+1;
+}
+
+function scoreV3(hist,n){
+  let ap=[];
+
+  for(let i=0;i<hist.length;i++){
+    if(hist[i].dezenas.includes(n)) ap.push(i);
+  }
+
+  let passo=passoAtual(hist,n);
+  let chegou=0,saiu=0;
+
+  for(let j=1;j<ap.length;j++){
+    let gap=ap[j]-ap[j-1];
+
+    if(gap>=passo) chegou++;
+    if(gap===passo) saiu++;
+  }
+
+  return {
+    dezena:n,
+    passo,
+    chegou,
+    saiu,
+    score:(saiu+1)/(chegou+10)
+  };
+}
+
+function faixa(p){
+  if(p<=3)return "1–3";
+  if(p<=6)return "4–6";
+  if(p<=10)return "7–10";
+  if(p<=15)return "11–15";
+  return "16+";
+}
+
+function intervalo95(acertos,n){
+  if(n===0)return [0,0];
+
+  let p=acertos/n;
+  let z=1.96;
+
+  let den=1+(z*z/n);
+
+  let centro=
+    (p+(z*z/(2*n)))/den;
+
+  let margem=
+    z*Math.sqrt(
+      (p*(1-p)/n)+(z*z/(4*n*n))
+    )/den;
+
+  return [
+    Math.max(0,centro-margem),
+    Math.min(1,centro+margem)
+  ];
+}
+
+function executarBacktest(concursos,ultimos){
+
+  let inicioMin=30;
+  let primeiro=inicioMin;
+
+  if(ultimos!==null){
+    primeiro=Math.max(
+      inicioMin,
+      concursos.length-ultimos
+    );
+  }
+
+  let testes=0;
+  let acertosTop10=0;
+
+  let f={
+    "1–3":{n:0,a:0},
+    "4–6":{n:0,a:0},
+    "7–10":{n:0,a:0},
+    "11–15":{n:0,a:0},
+    "16+":{n:0,a:0}
+  };
+
+  let dist=[0,0,0,0,0,0,0];
+
+  for(let alvo=primeiro;
+          alvo<concursos.length;
+          alvo++){
+
+    let hist=concursos.slice(0,alvo);
+    let real=new Set(concursos[alvo].dezenas);
+
+    let ranking=[];
+
+    for(let n=1;n<=60;n++){
+      ranking.push(scoreV3(hist,n));
+    }
+
+    ranking.sort((a,b)=>{
+      if(b.score!==a.score)
+        return b.score-a.score;
+
+      if(b.chegou!==a.chegou)
+        return b.chegou-a.chegou;
+
+      return a.dezena-b.dezena;
+    });
+
+    let top10=ranking.slice(0,10);
+    let hits=0;
+
+    for(let item of top10){
+      let nome=faixa(item.passo);
+
+      f[nome].n++;
+
+      if(real.has(item.dezena)){
+        f[nome].a++;
+        hits++;
+      }
+    }
+
+    acertosTop10+=hits;
+    dist[hits]++;
+    testes++;
+  }
+
+  return {
+    testes,
+    media:testes ? acertosTop10/testes : 0,
+    faixas:f,
+    dist
+  };
+}
+
+function classeLift(l){
+  if(l>=1.10)return "good";
+  if(l<=0.90)return "bad";
+  return "neutral";
+}
+
+function analisar(){
+
+  let concursos=parseHistorico(
+    document.getElementById("historico").value
+  );
+
+  if(concursos.length<40){
+    alert("Use pelo menos 40 concursos.");
+    return;
+  }
+
+  let janelas=[
+    {nome:"Últimos 25",n:25},
+    {nome:"Últimos 50",n:50},
+    {nome:"Últimos 100",n:100},
+    {nome:"Histórico disponível",n:null}
+  ];
+
+  let resultados=janelas.map(j=>({
+    nome:j.nome,
+    r:executarBacktest(concursos,j.n)
+  }));
+
+  let html=`
+  <div class="card">
+    <h2>VALIDAÇÃO V6 CONCLUÍDA</h2>
+
+    <p>
+    ${concursos.length} concursos reconhecidos.<br>
+    Intervalo:
+    <b>${concursos[0].concurso}</b>
+    até
+    <b>${concursos[concursos.length-1].concurso}</b>
+    </p>
+
+    <p class="small">
+    Todos os testes são walk-forward:
+    para classificar um concurso, somente os resultados
+    anteriores a ele são utilizados.
+    </p>
+  </div>
+
+  <div class="card">
+    <h2>ESTABILIDADE DO TOP 10</h2>
+
+    <table>
+      <tr>
+        <th>Janela</th>
+        <th>Testes</th>
+        <th>Média</th>
+        <th>Baseline</th>
+        <th>Dif.</th>
+      </tr>
+  `;
+
+  for(let x of resultados){
+
+    let dif=x.r.media-1;
+    let cls=
+      dif>0.05 ? "good":
+      dif<-0.05 ? "bad":"neutral";
+
+    html+=`
+    <tr>
+      <td>${x.nome}</td>
+      <td>${x.r.testes}</td>
+      <td><b>${x.r.media.toFixed(3)}</b></td>
+      <td>1.000</td>
+      <td class="${cls}">
+        ${dif>=0?"+":""}${dif.toFixed(3)}
+      </td>
+    </tr>`;
+  }
+
+  html+=`
+    </table>
+  </div>
+  `;
+
+  for(let x of resultados){
+
+    html+=`
+    <div class="card">
+
+    <h2>${x.nome}</h2>
+
+    <table>
+      <tr>
+        <th>Passo</th>
+        <th>N</th>
+        <th>Acertos</th>
+        <th>Taxa</th>
+        <th>IC95%</th>
+        <th>Lift</th>
+      </tr>
+    `;
+
+    for(let nome of
+      ["1–3","4–6","7–10","11–15","16+"]){
+
+      let z=x.r.faixas[nome];
+
+      let taxa=z.n ? z.a/z.n : 0;
+      let lift=taxa/0.10;
+
+      let ic=intervalo95(z.a,z.n);
+
+      html+=`
+      <tr>
+        <td><b>${nome}</b></td>
+        <td>${z.n}</td>
+        <td>${z.a}</td>
+        <td>${(taxa*100).toFixed(1)}%</td>
+        <td>
+          ${(ic[0]*100).toFixed(1)}–
+          ${(ic[1]*100).toFixed(1)}%
+        </td>
+        <td class="${classeLift(lift)}">
+          ${lift.toFixed(2)}×
+        </td>
+      </tr>
+      `;
+    }
+
+    html+=`
+    </table>
+    </div>
+    `;
+  }
+
+  html+=`
+  <div class="card">
+
+  <h2>CRITÉRIO PARA A PRÓXIMA ETAPA</h2>
+
+  <p class="small">
+  Não basta uma faixa apresentar lift acima de 1,00.
+  Procuramos sinais que se repitam em diferentes janelas,
+  tenham amostra razoável e não dependam de poucos concursos.
+
+  <br><br>
+
+  Se o intervalo de confiança continuar abrangendo aproximadamente
+  o baseline de 10%, o resultado deverá ser tratado como
+  inconclusivo e não como evidência de capacidade preditiva.
+
+  <br><br>
+
+  Somente depois desta validação decidiremos se existe justificativa
+  para construir uma nova V7 ou se precisamos ampliar primeiro
+  o histórico analisado.
+  </p>
+
+  </div>
+  `;
+
+  document.getElementById("resultado").innerHTML=html;
+}
+
+</script>
+</body>
+</html>
