@@ -1,0 +1,286 @@
+
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Mega Passos V24 — Etapa 15</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#07111f;color:#f4f7fb;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif}
+main{max-width:1050px;margin:auto;padding:22px 15px 70px}
+h1{font-size:29px;margin:0 0 10px}
+h2{font-size:21px;margin:0 0 12px}
+.sub{color:#b2c1d5;line-height:1.5}
+.card{background:#152136;border-radius:19px;padding:19px;margin:18px 0;overflow-x:auto}
+textarea{width:100%;height:240px;padding:13px;border:1px solid #61718a;border-radius:12px;background:#091629;color:white;font-size:14px}
+button{width:100%;border:0;border-radius:12px;background:#86d292;color:#082b19;font-size:18px;font-weight:800;padding:17px;margin-top:12px}
+button:disabled{opacity:.5}
+table{border-collapse:collapse;width:100%;min-width:650px}
+td,th{border-bottom:1px solid #384860;padding:10px 7px;text-align:center;white-space:nowrap}
+th{color:#a5e0ad}
+.ok{color:#86d292;font-weight:bold}
+.warn{color:#ffd477;font-weight:bold}
+.barbox{height:14px;background:#314158;border-radius:10px;overflow:hidden;margin-top:12px}
+#bar{height:100%;width:0;background:#86d292}
+p{line-height:1.5}
+</style>
+</head>
+<body>
+<main>
+<h1>MEGA PASSOS V24 — ETAPA 15</h1>
+<p class="sub">Auditoria de controles aleatórios e frequências. Nenhum peso é alterado. Concurso 3067 reservado.</p>
+
+<section class="card">
+<h2>Histórico 1–3066</h2>
+<p class="sub">Cole uma linha por concurso: número do concurso e seis dezenas.</p>
+<textarea id="dados" placeholder="1 04 05 30 33 41 52&#10;2 09 37 39 41 43 49&#10;..."></textarea>
+<button id="btn" onclick="iniciar()">EXECUTAR AUDITORIA V24</button>
+<p id="status" class="sub">Aguardando histórico.</p>
+<div class="barbox"><div id="bar"></div></div>
+</section>
+<div id="saida"></div>
+</main>
+
+<script>
+"use strict";
+
+const INICIO=100,OOS=2177,SIMS=1000,SEED=24015;
+const LABELS=["F50","F25","Ranking fixo 01–60","Aleatório reproduzível"];
+
+function parseDados(txt){
+ const a=[];
+ for(const linha of txt.trim().split(/\n+/)){
+  const n=linha.trim().split(/\s+/).map(Number);
+  if(n.length!==7)throw Error("Linha inválida: "+linha.slice(0,60));
+  const concurso=n[0],dezenas=n.slice(1);
+  if(!Number.isInteger(concurso)||dezenas.some(x=>!Number.isInteger(x)||x<1||x>60)||new Set(dezenas).size!==6)
+   throw Error("Concurso inválido: "+linha.slice(0,60));
+  a.push({concurso,dezenas});
+ }
+ a.sort((x,y)=>x.concurso-y.concurso);
+ if(a.length!==3066)throw Error("Esperados 3066 concursos; recebidos "+a.length);
+ for(let i=0;i<a.length;i++)
+  if(a[i].concurso!==i+1)throw Error("Concurso ausente ou duplicado: "+(i+1));
+ return a;
+}
+
+function rng(seed){
+ let x=seed>>>0;
+ return ()=>{
+  x^=x<<13;
+  x^=x>>>17;
+  x^=x<<5;
+  return (x>>>0)/4294967296;
+ };
+}
+
+function shuffleTop10(random){
+ const a=Array.from({length:60},(_,i)=>i+1);
+ for(let i=0;i<10;i++){
+  const j=i+Math.floor(random()*(60-i));
+  [a[i],a[j]]=[a[j],a[i]];
+ }
+ return a.slice(0,10);
+}
+
+function acc(){
+ return {n:0,sum:0,dist:[0,0,0,0,0,0,0]};
+}
+
+function hit(top,real){
+ let h=0;
+ for(const d of top)if(real.has(d))h++;
+ return h;
+}
+
+function add(a,h){
+ a.n++;
+ a.sum+=h;
+ a.dist[h]++;
+}
+
+function mean(a){return a.sum/a.n}
+function fmt(v,n=3){return Number(v).toFixed(n)}
+
+function stats(a){
+ const m=mean(a);
+ const v=6*(10/60)*(1-10/60)*(54/59);
+ const se=Math.sqrt(v/a.n);
+ return {m,se,z:(m-1)/se,lo:m-1.96*se,hi:m+1.96*se};
+}
+
+function ranks(cont){
+ return Array.from({length:60},(_,i)=>i+1)
+  .sort((a,b)=>cont[b]-cont[a]||a-b)
+  .slice(0,10);
+}
+
+function card(title,inner){
+ return '<section class="card"><h2>'+title+'</h2>'+inner+'</section>';
+}
+
+function summaryRow(label,a){
+ const s=stats(a);
+ return '<tr><td>'+label+'</td><td>'+a.n+'</td><td>'+
+  fmt(s.m,6)+'</td><td>'+fmt(s.z,2)+'</td><td>'+
+  fmt(s.lo)+'–'+fmt(s.hi)+'</td></tr>';
+}
+
+function tableAcc(title,groups){
+ let s='<table><tr><th>Modelo</th><th>N</th><th>Top10</th><th>Z</th><th>IC nominal 95%</th></tr>';
+ for(let i=0;i<groups.length;i++)
+  s+=summaryRow(LABELS[i],groups[i]);
+ return card(title,s+'</table>');
+}
+
+async function auditar(hist){
+ const random=rng(SEED);
+ const dev=LABELS.map(acc);
+ const oos=LABELS.map(acc);
+ const global=LABELS.map(acc);
+ const count25=new Int16Array(61);
+ const count50=new Int16Array(61);
+ const fixed=Array.from({length:10},(_,i)=>i+1);
+ const targets=[];
+
+ for(let t=0;t<50;t++){
+  for(const d of hist[t].dezenas){
+   count50[d]++;
+   if(t>=25)count25[d]++;
+  }
+ }
+
+ for(let t=50;t<hist.length;t++){
+  if(t>=INICIO){
+   const concurso=hist[t].concurso;
+   const real=new Set(hist[t].dezenas);
+   const tops=[
+    ranks(count50),
+    ranks(count25),
+    fixed,
+    shuffleTop10(random)
+   ];
+   const dest=concurso<OOS?dev:oos;
+
+   for(let i=0;i<4;i++){
+    const h=hit(tops[i],real);
+    add(global[i],h);
+    add(dest[i],h);
+   }
+
+   if(concurso>=OOS)targets.push(real);
+  }
+
+  for(const d of hist[t-50].dezenas)count50[d]--;
+  for(const d of hist[t].dezenas)count50[d]++;
+  for(const d of hist[t-25].dezenas)count25[d]--;
+  for(const d of hist[t].dezenas)count25[d]++;
+
+  if(t>=INICIO&&((t-INICIO)%100===0||t===hist.length-1)){
+   document.getElementById("status").textContent=
+    "Auditando concurso "+hist[t].concurso+" / 3066";
+   document.getElementById("bar").style.width=
+    fmt((t-INICIO+1)/(hist.length-INICIO)*40,1)+"%";
+   await new Promise(r=>setTimeout(r,0));
+  }
+ }
+
+ const randomSim=rng(SEED+1);
+ const simSums=new Float64Array(SIMS);
+ const obs=oos[0].sum;
+
+ for(let j=0;j<SIMS;j++){
+  let sum=0;
+  for(const real of targets)
+   sum+=hit(shuffleTop10(randomSim),real);
+  simSums[j]=sum;
+
+  if(j%25===0){
+   document.getElementById("status").textContent=
+    "Simulação aleatória "+(j+1)+" / "+SIMS;
+   document.getElementById("bar").style.width=
+    fmt(40+(j+1)/SIMS*60,1)+"%";
+   await new Promise(r=>setTimeout(r,0));
+  }
+ }
+
+ const sorted=Array.from(simSums).sort((a,b)=>a-b);
+ const ge=sorted.filter(v=>v>=obs).length;
+ const p=(ge+1)/(SIMS+1);
+ const q=i=>sorted[Math.floor(i*(SIMS-1))]/targets.length;
+
+ return {
+  dev,oos,global,obs,p,ge,
+  q05:q(.05),q50:q(.5),q95:q(.95)
+ };
+}
+
+function mostrar(r){
+ let html=
+  tableAcc("GLOBAL — 101 A 3066",r.global)+
+  tableAcc("DEV — 101 A 2176",r.dev)+
+  tableAcc("OOS — 2177 A 3066",r.oos);
+
+ html+=card("CONTROLE DE SIMULAÇÕES — OOS",
+  "<p>Simulações: <b>"+SIMS+
+  "</b> rankings aleatórios independentes por concurso, com semente fixa <b>"+
+  (SEED+1)+"</b>.</p>"+
+  "<p>F50 Top10 OOS: <b>"+fmt(mean(r.oos[0]),6)+
+  "</b> ("+r.obs+" acertos acumulados).</p>"+
+  "<p>Distribuição simulada das médias: percentil 5% <b>"+
+  fmt(r.q05)+"</b>, mediana <b>"+fmt(r.q50)+
+  "</b>, percentil 95% <b>"+fmt(r.q95)+"</b>.</p>"+
+  "<p>Simulações com resultado igual ou superior ao F50: <b>"+
+  r.ge+" de "+SIMS+"</b>.</p>"+
+  "<p>Probabilidade empírica unilateral com correção +1: <b>"+
+  fmt(r.p,4)+"</b>.</p>"+
+  "<p class='sub'>O F50 foi escolhido após análise dos mesmos concursos OOS. Este não é um teste independente de descoberta.</p>"
+ );
+
+ let t="<table><tr><th>Acertos Top10</th><th>F50 observado</th><th>Esperado aleatório</th></tr>";
+
+ const comb=(n,k)=>{
+  if(k<0||k>n)return 0;
+  let x=1;
+  for(let i=1;i<=k;i++)x=x*(n-k+i)/i;
+  return x;
+ };
+
+ for(let x=0;x<=6;x++){
+  const prob=comb(10,x)*comb(50,6-x)/comb(60,6);
+  t+="<tr><td>"+x+"</td><td>"+r.oos[0].dist[x]+
+   "</td><td>"+fmt(890*prob,1)+"</td></tr>";
+ }
+
+ html+=card("DISTRIBUIÇÃO F50 TOP10 — OOS",t+"</table>");
+
+ html+=card("CONCLUSÃO E GOVERNANÇA",
+  "<p>Baseline teórico Top10: <b>1,000</b> acerto por sorteio. A comparação não altera M5, F50 ou pesos.</p>"+
+  "<p class='sub'>Resultados de modelos fixos ou simulados não tornam previsível um sorteio justo. Qualquer alegação de vantagem exige validação futura independente.</p>"
+ );
+
+ document.getElementById("saida").innerHTML=html;
+ document.getElementById("saida").scrollIntoView({behavior:"smooth"});
+}
+
+async function iniciar(){
+ const btn=document.getElementById("btn");
+ btn.disabled=true;
+ document.getElementById("saida").innerHTML="";
+ try{
+  const hist=parseDados(document.getElementById("dados").value);
+  const r=await auditar(hist);
+  document.getElementById("status").textContent="Auditoria V24 concluída.";
+  document.getElementById("bar").style.width="100%";
+  mostrar(r);
+ }catch(e){
+  document.getElementById("status").textContent="ERRO: "+e.message;
+  alert(e.message);
+ }finally{
+  btn.disabled=false;
+ }
+}
+</script>
+</body>
+</html>
