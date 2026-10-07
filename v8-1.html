@@ -1,0 +1,655 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Mega Passos V8.1</title>
+
+<style>
+*{box-sizing:border-box}
+body{
+ margin:0;background:#07111f;color:#f5f7fb;
+ font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif
+}
+.container{max-width:900px;margin:auto;padding:22px 18px 80px}
+h1{font-size:34px}
+h2{font-size:27px}
+.sub{color:#aeb9ca;line-height:1.5}
+.card{
+ background:#131f32;border-radius:24px;
+ padding:24px;margin:22px 0
+}
+textarea{
+ width:100%;min-height:250px;background:#0b1627;color:white;
+ border:2px solid #43516a;border-radius:18px;
+ padding:15px;font-size:16px
+}
+button{
+ width:100%;border:0;border-radius:20px;
+ padding:22px;margin-top:16px;background:#86d091;
+ color:#1760e8;font-size:23px;font-weight:800
+}
+button:disabled{opacity:.55}
+.bolas{display:flex;flex-wrap:wrap;gap:14px}
+.bola{
+ width:74px;height:74px;border-radius:50%;
+ display:flex;align-items:center;justify-content:center;
+ background:#86d091;color:#07111f;
+ font-size:27px;font-weight:800
+}
+table{width:100%;border-collapse:collapse;font-size:15px}
+th,td{
+ padding:11px 7px;border-bottom:1px solid #45536a;
+ text-align:center;white-space:nowrap
+}
+th{color:#9ed7a5}
+.scroll{overflow-x:auto}
+.good{color:#86d091;font-weight:800}
+.bad{color:#ff8585;font-weight:800}
+.warn{color:#ffd36b;font-weight:800}
+.big{font-size:32px;font-weight:800;color:#86d091}
+
+.progress{
+ width:100%;height:18px;background:#26354b;
+ border-radius:12px;overflow:hidden;margin-top:15px
+}
+.bar{
+ height:100%;width:0%;background:#86d091;
+ transition:width .1s
+}
+</style>
+</head>
+
+<body>
+<div class="container">
+
+<h1>MEGA PASSOS V8.1</h1>
+<p class="sub">
+Otimizador walk-forward acelerado para celular.
+O concurso futuro nunca participa do cálculo de sua própria previsão.
+</p>
+
+<div class="card">
+<h2>Histórico</h2>
+<p class="sub">
+Cole os concursos de 2918 até 3066. Não inclua o 3067 neste teste.
+</p>
+
+<textarea id="dados"
+placeholder="3066 04 06 09 13 28 48
+3065 08 10 30 38 50 53
+..."></textarea>
+
+<button id="botao" onclick="iniciar()">OTIMIZAR V8.1</button>
+</div>
+
+<div id="status"></div>
+<div id="saida"></div>
+
+</div>
+
+<script>
+
+function parseDados(txt){
+ let linhas=txt.trim().split(/\n+/);
+ let mapa=new Map();
+
+ for(let linha of linhas){
+   let n=linha.trim().split(/\s+/).map(Number);
+   if(n.length<7) continue;
+
+   let concurso=n[0];
+   let dezenas=n.slice(1,7);
+
+   if(!Number.isInteger(concurso)) continue;
+   if(dezenas.some(x=>x<1||x>60)) continue;
+   if(new Set(dezenas).size!==6) continue;
+
+   mapa.set(concurso,{concurso,dezenas});
+ }
+
+ return [...mapa.values()].sort((a,b)=>a.concurso-b.concurso);
+}
+
+function faixa(p){
+ if(p<=3)return 0;
+ if(p<=6)return 1;
+ if(p<=10)return 2;
+ if(p<=15)return 3;
+ return 4;
+}
+
+/*
+Cria todas as informações necessárias em uma única passagem.
+*/
+function prepararSnapshots(hist){
+
+ let last=Array(61).fill(-1);
+ let ocorr=Array.from({length:61},()=>[]);
+ let passos=Array.from({length:61},()=>[]);
+
+ let freq25=Array(61).fill(0);
+ let freq50=Array(61).fill(0);
+ let freq100=Array(61).fill(0);
+
+ let snapshots=[];
+
+ for(let t=0;t<hist.length;t++){
+
+   /*
+   Snapshot ANTES de revelar o concurso t.
+   */
+   if(t>=30){
+
+     let features=[];
+
+     for(let d=1;d<=60;d++){
+
+       let p=last[d]<0 ? t+1 : t-last[d];
+
+       let ps=passos[d];
+
+       let media=10;
+       let desvio=5;
+
+       if(ps.length){
+         media=ps.reduce((a,b)=>a+b,0)/ps.length;
+       }
+
+       if(ps.length>=2){
+         let v=ps.reduce((s,x)=>s+(x-media)*(x-media),0)/ps.length;
+         desvio=Math.sqrt(v)||1;
+       }
+
+       let z=(p-media)/desvio;
+       z=Math.max(-2.5,Math.min(2.5,z));
+
+       /*
+       Hazard empírico suavizado.
+       */
+       let chegou=0;
+       let saiu=0;
+
+       for(let x of ps){
+         if(x>=p) chegou++;
+         if(x===p) saiu++;
+       }
+
+       let hz=(saiu+1)/(chegou+10);
+
+       features.push({
+         d,
+         p,
+         z,
+         hz,
+         f25:freq25[d]/Math.min(25,t),
+         f50:freq50[d]/Math.min(50,t),
+         f100:freq100[d]/Math.min(100,t)
+       });
+     }
+
+     snapshots.push({
+       t,
+       concurso:hist[t].concurso,
+       real:hist[t].dezenas,
+       features
+     });
+   }
+
+   /*
+   Agora revela o concurso t e atualiza estado.
+   */
+   for(let d=1;d<=60;d++){
+
+     let saiu=hist[t].dezenas.includes(d);
+
+     if(saiu){
+       if(last[d]>=0){
+         passos[d].push(t-last[d]);
+       }
+       last[d]=t;
+       ocorr[d].push(t);
+     }
+
+     if(t>=25 && hist[t-25].dezenas.includes(d)) freq25[d]--;
+     if(t>=50 && hist[t-50].dezenas.includes(d)) freq50[d]--;
+     if(t>=100 && hist[t-100].dezenas.includes(d)) freq100[d]--;
+
+     if(saiu){
+       freq25[d]++;
+       freq50[d]++;
+       freq100[d]++;
+     }
+   }
+ }
+
+ return snapshots;
+}
+
+function construirRegimes(snapshots){
+
+ let sel=[0,0,0,0,0];
+ let hit=[0,0,0,0,0];
+
+ for(let s of snapshots){
+
+   let real=new Set(s.real);
+
+   for(let f of s.features){
+     let k=faixa(f.p);
+     sel[k]++;
+     if(real.has(f.d)) hit[k]++;
+   }
+ }
+
+ return sel.map((n,i)=>(hit[i]+2)/(n+20));
+}
+
+function aplicarRegime(snapshots,regimes){
+
+ for(let s of snapshots){
+   for(let f of s.features){
+     f.regime=regimes[faixa(f.p)];
+   }
+ }
+}
+
+const modelos=[];
+
+/*
+Busca menor que na V8 original, porém ainda ampla:
+3*3*3*3*3*3 = 729 combinações no máximo.
+*/
+for(let wh of [0,1,2])
+for(let wr of [0,1,2])
+for(let w25 of [-1,0,1])
+for(let w50 of [-1,0,1])
+for(let w100 of [-1,0,1])
+for(let wz of [-1,0,1]){
+
+ if(
+   wh===0 && wr===0 &&
+   w25===0 && w50===0 &&
+   w100===0 && wz===0
+ ) continue;
+
+ modelos.push({wh,wr,w25,w50,w100,wz});
+}
+
+function score(f,m){
+
+ return (
+   m.wh*(f.hz-.10)*10 +
+   m.wr*(f.regime-.10)*10 +
+   m.w25*(f.f25-.10)*5 +
+   m.w50*(f.f50-.10)*5 +
+   m.w100*(f.f100-.10)*5 +
+   m.wz*f.z*.15
+ );
+}
+
+function rankingFeatures(features,m){
+
+ return features.map(f=>({
+   ...f,
+   score:score(f,m)
+ })).sort((a,b)=>b.score-a.score || a.d-b.d);
+}
+
+function testar(modelo,snaps){
+
+ let soma6=0,soma10=0,soma15=0,soma20=0;
+
+ for(let s of snaps){
+
+   let r=rankingFeatures(s.features,modelo);
+   let real=new Set(s.real);
+
+   function hits(k){
+     let n=0;
+     for(let i=0;i<k;i++){
+       if(real.has(r[i].d)) n++;
+     }
+     return n;
+   }
+
+   soma6+=hits(6);
+   soma10+=hits(10);
+   soma15+=hits(15);
+   soma20+=hits(20);
+ }
+
+ let n=snaps.length;
+
+ return {
+   m6:soma6/n,
+   m10:soma10/n,
+   m15:soma15/n,
+   m20:soma20/n
+ };
+}
+
+function consenso(features,elite){
+
+ let soma=Array(61).fill(0);
+
+ for(let e of elite){
+
+   let r=rankingFeatures(features,e.modelo);
+
+   r.forEach((x,i)=>{
+     soma[x.d]+=i+1;
+   });
+ }
+
+ return features.map(f=>({
+   ...f,
+   consenso:soma[f.d]/elite.length
+ })).sort((a,b)=>a.consenso-b.consenso || a.d-b.d);
+}
+
+function pct(x){return (x*100).toFixed(1)+"%"}
+function num(x){return Number(x).toFixed(3)}
+
+function sleep(ms){
+ return new Promise(r=>setTimeout(r,ms));
+}
+
+async function iniciar(){
+
+ let botao=document.getElementById("botao");
+ let status=document.getElementById("status");
+ let saida=document.getElementById("saida");
+
+ botao.disabled=true;
+ saida.innerHTML="";
+
+ let hist=parseDados(document.getElementById("dados").value);
+
+ if(hist.length<80){
+   status.innerHTML=`
+   <div class="card">
+   <h2>Histórico insuficiente</h2>
+   <p>Reconhecidos: ${hist.length}</p>
+   </div>`;
+   botao.disabled=false;
+   return;
+ }
+
+ status.innerHTML=`
+ <div class="card">
+   <h2>PROCESSANDO V8.1...</h2>
+   <p id="txtprog">Preparando histórico...</p>
+   <div class="progress"><div class="bar" id="bar"></div></div>
+ </div>`;
+
+ await sleep(80);
+
+ let snapshots=prepararSnapshots(hist);
+
+ document.getElementById("bar").style.width="10%";
+ document.getElementById("txtprog").innerText=
+ "Calculando regimes históricos...";
+
+ await sleep(50);
+
+ /*
+ IMPORTANTE:
+ Os últimos 25 concursos são validação.
+ */
+ let indiceCorte=hist.length-25;
+
+ let treino=snapshots.filter(s=>s.t<indiceCorte);
+ let valid=snapshots.filter(s=>s.t>=indiceCorte);
+
+ /*
+ Regimes aprendidos SOMENTE no treino.
+ */
+ let regimes=construirRegimes(treino);
+
+ aplicarRegime(treino,regimes);
+ aplicarRegime(valid,regimes);
+
+ let resultados=[];
+
+ for(let i=0;i<modelos.length;i++){
+
+   let bt=testar(modelos[i],treino);
+
+   let objetivo=
+     (bt.m10-1)*5 +
+     (bt.m6-.6)*2 +
+     (bt.m15-1.5) +
+     (bt.m20-2)*.5;
+
+   resultados.push({
+     modelo:modelos[i],
+     bt,
+     objetivo
+   });
+
+   if(i%30===0){
+     let p=10+Math.round(65*i/modelos.length);
+
+     document.getElementById("bar").style.width=p+"%";
+     document.getElementById("txtprog").innerText=
+       "Testando modelos: "+(i+1)+" / "+modelos.length;
+
+     await sleep(1);
+   }
+ }
+
+ resultados.sort((a,b)=>b.objetivo-a.objetivo);
+
+ let elite=resultados.slice(0,10);
+
+ document.getElementById("bar").style.width="80%";
+ document.getElementById("txtprog").innerText=
+ "Executando validação fora do treino...";
+
+ await sleep(30);
+
+ let totalHits=0;
+ let dist=Array(7).fill(0);
+ let testes=[];
+
+ for(let s of valid){
+
+   let r=consenso(s.features,elite);
+   let top=new Set(r.slice(0,10).map(x=>x.d));
+
+   let h=s.real.filter(x=>top.has(x)).length;
+
+   totalHits+=h;
+   dist[h]++;
+
+   testes.push({
+     concurso:s.concurso,
+     hits:h
+   });
+ }
+
+ let media=totalHits/valid.length;
+
+ /*
+ Snapshot do próximo concurso:
+ constrói histórico fictício sem revelar resultado.
+ */
+ let ultimo=hist[hist.length-1];
+
+ let histTemp=[
+   ...hist,
+   {
+     concurso:ultimo.concurso+1,
+     dezenas:[]
+   }
+ ];
+
+ let snapFinal=prepararSnapshots(histTemp);
+ let sf=snapFinal[snapFinal.length-1];
+
+ for(let f of sf.features){
+   f.regime=regimes[faixa(f.p)];
+ }
+
+ let rankFinal=consenso(sf.features,elite);
+
+ document.getElementById("bar").style.width="100%";
+ document.getElementById("txtprog").innerText=
+ "Concluído.";
+
+ await sleep(100);
+
+ mostrar(
+   hist,
+   rankFinal,
+   elite,
+   regimes,
+   media,
+   dist,
+   testes,
+   valid.length
+ );
+
+ botao.disabled=false;
+}
+
+function mostrar(hist,rank,elite,regimes,media,dist,testes,nValid){
+
+ let primeiro=hist[0].concurso;
+ let ultimo=hist[hist.length-1].concurso;
+
+ let html=`
+ <div class="card">
+ <h2>V8.1 CONCLUÍDA</h2>
+ <p><b>${hist.length}</b> concursos reconhecidos.</p>
+ <p>Intervalo: <b>${primeiro}</b> até <b>${ultimo}</b></p>
+ <p>Concurso alvo: <b>${ultimo+1}</b></p>
+ </div>
+
+ <div class="card">
+ <h2>VALIDAÇÃO FORA DO TREINO — TOP 10</h2>
+ <div class="big">${num(media)} / 6</div>
+ <p>Baseline aleatório: <b>1.000 / 6</b></p>
+ <p>Diferença:
+ <span class="${media>1?'good':media<1?'bad':'warn'}">
+ ${media>=1?'+':''}${num(media-1)}
+ </span></p>
+ <p>Lift: <b>${num(media)}×</b></p>
+ </div>
+
+ <div class="card">
+ <h2>TOP 10 — V8.1</h2>
+ <div class="bolas">`;
+
+ rank.slice(0,10).forEach(x=>{
+   html+=`<div class="bola">${String(x.d).padStart(2,"0")}</div>`;
+ });
+
+ html+=`</div></div>
+
+ <div class="card">
+ <h2>DISTRIBUIÇÃO — VALIDAÇÃO</h2>
+ <div class="scroll">
+ <table>
+ <tr><th>Acertos</th><th>Concursos</th><th>%</th></tr>`;
+
+ for(let i=0;i<=6;i++){
+   html+=`
+   <tr>
+   <td>${i}/6</td>
+   <td>${dist[i]}</td>
+   <td>${pct(dist[i]/nValid)}</td>
+   </tr>`;
+ }
+
+ html+=`
+ </table></div></div>
+
+ <div class="card">
+ <h2>REGIMES APRENDIDOS</h2>
+ <div class="scroll">
+ <table>
+ <tr><th>Passo</th><th>Taxa</th><th>Lift</th></tr>`;
+
+ let nomes=["1–3","4–6","7–10","11–15","16+"];
+
+ regimes.forEach((x,i)=>{
+   html+=`
+   <tr>
+   <td>${nomes[i]}</td>
+   <td>${pct(x)}</td>
+   <td>${num(x/.10)}×</td>
+   </tr>`;
+ });
+
+ html+=`
+ </table></div></div>
+
+ <div class="card">
+ <h2>RANKING COMPLETO — 60 DEZENAS</h2>
+ <div class="scroll">
+ <table>
+ <tr>
+ <th>#</th>
+ <th>Dez</th>
+ <th>Consenso</th>
+ <th>Passo</th>
+ <th>Hazard</th>
+ <th>Regime</th>
+ <th>F25</th>
+ <th>F50</th>
+ <th>F100</th>
+ </tr>`;
+
+ rank.forEach((x,i)=>{
+   html+=`
+   <tr>
+   <td>${i+1}</td>
+   <td><b>${String(x.d).padStart(2,"0")}</b></td>
+   <td>${x.consenso.toFixed(1)}</td>
+   <td>${x.p}</td>
+   <td>${pct(x.hz)}</td>
+   <td>${pct(x.regime)}</td>
+   <td>${pct(x.f25)}</td>
+   <td>${pct(x.f50)}</td>
+   <td>${pct(x.f100)}</td>
+   </tr>`;
+ });
+
+ html+=`
+ </table></div></div>
+
+ <div class="card">
+ <h2>ÚLTIMOS 25 TESTES — TOP 10</h2>
+ <div class="scroll">
+ <table>
+ <tr><th>Concurso</th><th>Acertos</th></tr>`;
+
+ testes.slice().reverse().forEach(x=>{
+   html+=`
+   <tr>
+   <td>${x.concurso}</td>
+   <td><b>${x.hits}/6</b></td>
+   </tr>`;
+ });
+
+ html+=`
+ </table></div></div>
+
+ <div class="card">
+ <h2>CONTROLE DA EXPERIÊNCIA</h2>
+ <p class="sub">
+ O concurso 3067 continua fora da otimização.
+ A V8.1 foi selecionada usando somente concursos anteriores.
+ Somente depois de avaliarmos esta validação interna
+ devemos revelar o 3067.
+ </p>
+ </div>`;
+
+ document.getElementById("saida").innerHTML=html;
+}
+
+</script>
+</body>
+</html>
