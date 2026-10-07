@@ -1,7 +1,284 @@
-MEGA PASSOS V22 — ETAPA 13
-Auditoria de equivalência V18 × V21. M5 original congelado. Nenhum ajuste de pesos.
-Histórico 1–3066
-Uma linha por concurso: número do concurso e seis dezenas. Não inclua 3067.
-EXECUTAR AUDITORIA V22
-Aguardando histórico.
 
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Mega Passos V22 — Etapa 13</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#07111f;color:#f4f7fb;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif}
+main{max-width:1050px;margin:auto;padding:22px 15px 70px}
+h1{font-size:29px;margin:0 0 10px}
+h2{font-size:22px;margin:0 0 14px}
+p{line-height:1.55}
+.sub{color:#b2c1d5}
+.card{background:#152136;border-radius:19px;padding:20px;margin:18px 0;overflow-x:auto}
+textarea{width:100%;height:250px;padding:13px;border:1px solid #61718a;border-radius:12px;background:#091629;color:white;font-size:14px}
+button{width:100%;border:0;border-radius:12px;background:#86d292;color:#082b19;font-size:18px;font-weight:800;padding:17px;margin-top:12px}
+button:disabled{opacity:.5}
+table{border-collapse:collapse;width:100%;min-width:650px}
+td,th{border-bottom:1px solid #384860;padding:10px 7px;text-align:center;white-space:nowrap}
+th{color:#a5e0ad}
+.ok{color:#86d292;font-weight:bold}
+.bad{color:#ff9999;font-weight:bold}
+.warn{color:#ffd477;font-weight:bold}
+.barbox{height:14px;background:#314158;border-radius:10px;overflow:hidden;margin-top:12px}
+#bar{height:100%;width:0;background:#86d292}
+code{color:#b4e4bc}
+</style>
+</head>
+<body>
+<main>
+<h1>MEGA PASSOS V22 — ETAPA 13</h1>
+<p class="sub">Auditoria de equivalência V18 × V21. Fórmulas originais da V18 restauradas. Nenhum peso será otimizado.</p>
+
+<section class="card">
+<h2>Histórico da Mega-Sena</h2>
+<p class="sub">Cole os concursos de 1 a 3066, uma linha por concurso. Não inclua o concurso 3067.</p>
+<textarea id="dados" placeholder="1 04 05 30 33 41 52&#10;2 09 37 39 41 43 49&#10;..."></textarea>
+<button id="btn" onclick="iniciar()">EXECUTAR AUDITORIA V22</button>
+<p id="status" class="sub">Aguardando histórico.</p>
+<div class="barbox"><div id="bar"></div></div>
+</section>
+
+<div id="saida"></div>
+</main>
+
+<script>
+"use strict";
+
+const KS=[6,10,15,20,25,30,40];
+const NOMES=["Hazard","Regime","F25","F50","F100","M5 original"];
+const INICIO=100;
+const OOS_INICIO=2177;
+
+function parseDados(txt){
+ const arr=[];
+ const linhas=txt.trim().split(/\n+/);
+ for(const linha of linhas){
+  const n=linha.trim().split(/\s+/).map(Number);
+  if(n.length!==7)throw Error("Linha inválida: "+linha.slice(0,65));
+  const concurso=n[0],dezenas=n.slice(1);
+  if(!Number.isInteger(concurso)||dezenas.some(x=>!Number.isInteger(x)||x<1||x>60)||new Set(dezenas).size!==6)
+   throw Error("Concurso ou dezenas inválidas: "+linha.slice(0,65));
+  arr.push({concurso,dezenas});
+ }
+ arr.sort((a,b)=>a.concurso-b.concurso);
+ if(arr.length!==3066)throw Error("Esperados 3066 concursos; encontrados "+arr.length);
+ for(let i=0;i<arr.length;i++)
+  if(arr[i].concurso!==i+1)throw Error("Histórico incompleto ou duplicado próximo ao concurso "+(i+1));
+ return arr;
+}
+
+function faixa(p){
+ if(p<=3)return 0;
+ if(p<=6)return 1;
+ if(p<=10)return 2;
+ if(p<=15)return 3;
+ return 4;
+}
+
+function criarAcumulador(){
+ return {n:0,soma:Object.fromEntries(KS.map(k=>[k,0]))};
+}
+
+function registrar(acc,ranking,real){
+ acc.n++;
+ const sorteadas=new Set(real);
+ for(const k of KS){
+  let ac=0;
+  for(let j=0;j<k;j++)if(sorteadas.has(ranking[j].d))ac++;
+  acc.soma[k]+=ac;
+ }
+}
+
+function media(acc,k){
+ return acc.n?acc.soma[k]/acc.n:0;
+}
+
+function fmt(x,n=3){
+ return Number(x).toFixed(n);
+}
+
+function estatistica(acc){
+ const m=media(acc,10);
+ const variancia=6*(10/60)*(1-10/60)*((60-6)/(60-1));
+ const ep=Math.sqrt(variancia/acc.n);
+ return {m,ep,z:(m-1)/ep,inf:m-1.96*ep,sup:m+1.96*ep};
+}
+
+/*
+ V18 ORIGINAL:
+ passoAtual(hist,d) retorna hist.length-i.
+ gaps utiliza somente intervalos completos.
+ Hazard sem gaps retorna 0.10.
+ Regimes aprendem com TODO o histórico desde t=30.
+*/
+
+function calcularRanking(hist,t){
+ const pos=Array.from({length:61},()=>[]);
+ const prefix=Array.from({length:61},()=>new Int32Array(t+1));
+
+ for(let i=0;i<t;i++){
+  for(let d=1;d<=60;d++)prefix[d][i+1]=prefix[d][i];
+  for(const d of hist[i].dezenas){
+   pos[d].push(i);
+   prefix[d][i+1]++;
+  }
+ }
+
+ const passos=Array.from({length:t+1},()=>null);
+ const atual=new Int32Array(61);
+ const hz=new Float64Array(61);
+ const f25=new Float64Array(61);
+ const f50=new Float64Array(61);
+ const f100=new Float64Array(61);
+
+ for(let d=1;d<=60;d++){
+  const p=pos[d];
+  const passo=p.length?t-p[p.length-1]:t+1;
+  atual[d]=passo;
+
+  let chegou=0,saiu=0;
+  for(let j=1;j<p.length;j++){
+   const g=p[j]-p[j-1];
+   if(g>=passo)chegou++;
+   if(g===passo)saiu++;
+  }
+  hz[d]=p.length<2?.10:(saiu+1)/(chegou+10);
+
+  f25[d]=(prefix[d][t]-prefix[d][Math.max(0,t-25)])/Math.min(t,25);
+  f50[d]=(prefix[d][t]-prefix[d][Math.max(0,t-50)])/Math.min(t,50);
+  f100[d]=(prefix[d][t]-prefix[d][Math.max(0,t-100)])/Math.min(t,100);
+ }
+
+ const n=new Float64Array(5);
+ const ac=new Float64Array(5);
+
+ /*
+ Equivalência exata de aprenderRegimes(hist):
+ Para cada alvo histórico i>=30, calcular o passo
+ usando exclusivamente os concursos anteriores a i.
+ */
+ const ultima=new Int32Array(61);
+ ultima.fill(-1);
+
+ for(let i=0;i<t;i++){
+  if(i>=30){
+   const real=new Set(hist[i].dezenas);
+   for(let d=1;d<=60;d++){
+    const passo=ultima[d]<0?i+1:i-ultima[d];
+    const b=faixa(passo);
+    n[b]++;
+    if(real.has(d))ac[b]++;
+   }
+  }
+  for(const d of hist[i].dezenas)ultima[d]=i;
+ }
+
+ const regimes=Array.from({length:5},(_,b)=>((ac[b]+2)/(n[b]+20))/.10);
+ const componentes=Array.from({length:6},()=>[]);
+
+ for(let d=1;d<=60;d++){
+  const r=regimes[faixa(atual[d])];
+  const valores=[
+   hz[d],r,f25[d],f50[d],f100[d],
+   hz[d]*.35+r*.25+f25[d]*.15+f50[d]*.15+f100[d]*.10
+  ];
+  for(let j=0;j<6;j++)componentes[j].push({d,score:valores[j]});
+ }
+
+ for(const ranking of componentes)
+  ranking.sort((a,b)=>b.score-a.score||a.d-b.d);
+
+ return componentes;
+}
+
+async function auditar(hist){
+ const global=NOMES.map(criarAcumulador);
+ const dev=NOMES.map(criarAcumulador);
+ const oos=NOMES.map(criarAcumulador);
+
+ for(let t=INICIO;t<hist.length;t++){
+  const ranking=calcularRanking(hist,t);
+  const real=hist[t].dezenas;
+  const destino=hist[t].concurso<OOS_INICIO?dev:oos;
+
+  for(let j=0;j<6;j++){
+   registrar(global[j],ranking[j],real);
+   registrar(destino[j],ranking[j],real);
+  }
+
+  if((t-INICIO)%20===0||t===hist.length-1){
+   const pct=(t-INICIO+1)/(hist.length-INICIO);
+   document.getElementById("bar").style.width=(pct*100)+"%";
+   document.getElementById("status").textContent=
+    "Auditando concurso "+hist[t].concurso+" de 3066 — "+fmt(pct*100,1)+"%";
+   await new Promise(resolve=>setTimeout(resolve,0));
+  }
+ }
+ return {global,dev,oos};
+}
+
+function tabelaComponentes(titulo,acc){
+ let html='<section class="card"><h2>'+titulo+'</h2><table><tr><th>Modelo</th><th>Testes</th><th>Top6</th><th>Top10</th><th>Top15</th><th>Top20</th><th>Δ Top10</th></tr>';
+ for(let j=0;j<NOMES.length;j++){
+  const a=acc[j],dif=media(a,10)-1;
+  html+='<tr><td>'+NOMES[j]+'</td><td>'+a.n+'</td><td>'+fmt(media(a,6))+'</td><td>'+fmt(media(a,10))+'</td><td>'+fmt(media(a,15))+'</td><td>'+fmt(media(a,20))+'</td><td class="'+(dif>0?"ok":dif<0?"bad":"warn")+'">'+(dif>=0?"+":"")+fmt(dif)+'</td></tr>';
+ }
+ return html+'</table></section>';
+}
+
+function mostrar(r){
+ const m5=r.global[5];
+ const e=estatistica(m5);
+ const equivalente=Math.abs(e.m-1.006)<.0005;
+ let html='<section class="card"><h2>TESTE DE EQUIVALÊNCIA V18</h2>';
+ html+='<p>Testes walk-forward: <b>'+m5.n+'</b></p>';
+ html+='<p>M5 Top10 global: <b>'+fmt(e.m,6)+'</b></p>';
+ html+='<p>Referência V18: <b>1,006 (arredondado)</b></p>';
+ html+='<p class="'+(equivalente?"ok":"bad")+'">'+
+  (equivalente?"EQUIVALÊNCIA NUMÉRICA CONFIRMADA NO TOP10":"DIVERGÊNCIA: REVISAR IMPLEMENTAÇÃO OU HISTÓRICO")+'</p>';
+ html+='<p class="sub">A igualdade de uma média arredondada é uma verificação parcial; não substitui comparação concurso a concurso.</p></section>';
+
+ html+=tabelaComponentes("AUDITORIA GLOBAL — 101 A 3066",r.global);
+ html+=tabelaComponentes("DESENVOLVIMENTO — 101 A 2176",r.dev);
+ html+=tabelaComponentes("VALIDAÇÃO OOS — 2177 A 3066",r.oos);
+
+ html+='<section class="card"><h2>ESTATÍSTICA M5 GLOBAL</h2><table>';
+ for(const [nome,valor] of [
+  ["Média Top10",fmt(e.m,6)],
+  ["Baseline aleatório","1.000000"],
+  ["Erro-padrão",fmt(e.ep,5)],
+  ["Z-score",fmt(e.z,3)],
+  ["IC 95%",fmt(e.inf,4)+" a "+fmt(e.sup,4)]
+ ])html+='<tr><td>'+nome+'</td><td>'+valor+'</td></tr>';
+ html+='</table><p class="sub">Referência estatística exploratória; os testes de múltiplos componentes exigem cautela.</p></section>';
+
+ html+='<section class="card"><h2>CONTROLE DA V22</h2><p>Pesos congelados: 35% Hazard + 25% Regime + 15% F25 + 15% F50 + 10% F100.</p><p>O concurso 3067 permanece excluído. Nenhuma seleção ou otimização foi feita com os resultados OOS.</p></section>';
+
+ document.getElementById("saida").innerHTML=html;
+ document.getElementById("saida").scrollIntoView({behavior:"smooth"});
+}
+
+async function iniciar(){
+ const btn=document.getElementById("btn");
+ btn.disabled=true;
+ document.getElementById("saida").innerHTML="";
+ try{
+  const hist=parseDados(document.getElementById("dados").value);
+  document.getElementById("status").textContent="Histórico validado. Iniciando auditoria...";
+  const r=await auditar(hist);
+  document.getElementById("status").textContent="Auditoria concluída.";
+  mostrar(r);
+ }catch(err){
+  document.getElementById("status").textContent="ERRO: "+err.message;
+  alert(err.message);
+ }finally{
+  btn.disabled=false;
+ }
+}
+</script>
+</body>
+</html>
