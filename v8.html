@@ -1,0 +1,645 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mega Passos V8</title>
+
+<style>
+*{box-sizing:border-box}
+body{
+  margin:0;
+  background:#07111f;
+  color:#f5f7fb;
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif;
+}
+.container{
+  max-width:900px;
+  margin:auto;
+  padding:24px 18px 80px;
+}
+h1{font-size:34px;margin-bottom:8px}
+h2{font-size:27px;margin-top:0}
+.sub{color:#aeb9ca;line-height:1.5}
+.card{
+  background:#131f32;
+  border-radius:24px;
+  padding:24px;
+  margin:22px 0;
+}
+textarea{
+  width:100%;
+  min-height:260px;
+  background:#0b1627;
+  color:white;
+  border:2px solid #43516a;
+  border-radius:18px;
+  padding:16px;
+  font-size:16px;
+}
+button{
+  width:100%;
+  border:0;
+  border-radius:20px;
+  padding:22px 12px;
+  margin-top:16px;
+  background:#86d091;
+  color:#1760e8;
+  font-size:23px;
+  font-weight:800;
+}
+.bolas{
+  display:flex;
+  flex-wrap:wrap;
+  gap:14px;
+}
+.bola{
+  width:74px;height:74px;
+  border-radius:50%;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  background:#86d091;
+  color:#07111f;
+  font-size:27px;
+  font-weight:800;
+}
+table{
+  width:100%;
+  border-collapse:collapse;
+  font-size:15px;
+}
+th,td{
+  padding:12px 7px;
+  border-bottom:1px solid #45536a;
+  text-align:center;
+}
+th{color:#9ed7a5}
+.good{color:#86d091;font-weight:800}
+.bad{color:#ff8585;font-weight:800}
+.warn{color:#ffd36b;font-weight:800}
+.scroll{overflow-x:auto}
+.big{
+  font-size:30px;
+  font-weight:800;
+  color:#86d091;
+}
+.small{font-size:13px;color:#aeb9ca}
+</style>
+</head>
+
+<body>
+<div class="container">
+
+<h1>MEGA PASSOS V8</h1>
+<p class="sub">
+Otimizador walk-forward. A V8 procura automaticamente combinações de sinais
+sem utilizar o resultado do concurso que está sendo previsto.
+</p>
+
+<div class="card">
+<h2>Histórico</h2>
+<p class="sub">
+Uma linha por concurso: concurso + seis dezenas.
+Para a validação externa atual, encerre no concurso 3066.
+</p>
+
+<textarea id="dados" placeholder="3066 04 06 09 13 28 48
+3065 08 10 30 38 50 53
+..."></textarea>
+
+<button onclick="executar()">OTIMIZAR V8</button>
+</div>
+
+<div id="saida"></div>
+
+</div>
+
+<script>
+
+function parseDados(txt){
+  let linhas=txt.trim().split(/\n+/);
+  let arr=[];
+
+  for(let linha of linhas){
+    let n=linha.trim().split(/\s+/).map(Number);
+    if(n.length<7) continue;
+
+    let concurso=n[0];
+    let dezenas=n.slice(1,7);
+
+    if(!Number.isInteger(concurso)) continue;
+    if(dezenas.some(x=>x<1||x>60)) continue;
+    if(new Set(dezenas).size!==6) continue;
+
+    arr.push({concurso,dezenas});
+  }
+
+  arr.sort((a,b)=>a.concurso-b.concurso);
+
+  let mapa=new Map();
+  for(let x of arr) mapa.set(x.concurso,x);
+
+  return [...mapa.values()];
+}
+
+function aparicoes(hist,d){
+  let a=[];
+  for(let i=0;i<hist.length;i++){
+    if(hist[i].dezenas.includes(d)) a.push(i);
+  }
+  return a;
+}
+
+function passoAtual(hist,d){
+  let a=aparicoes(hist,d);
+  if(!a.length) return hist.length+1;
+  return hist.length-a[a.length-1];
+}
+
+function freq(hist,d,n){
+  let h=hist.slice(-n);
+  if(!h.length) return 0;
+  let c=0;
+  for(let x of h) if(x.dezenas.includes(d)) c++;
+  return c/h.length;
+}
+
+function mediaPassos(hist,d){
+  let a=aparicoes(hist,d);
+  if(a.length<2) return 10;
+  let p=[];
+  for(let i=1;i<a.length;i++) p.push(a[i]-a[i-1]);
+  return p.reduce((s,x)=>s+x,0)/p.length;
+}
+
+function desvioPassos(hist,d){
+  let a=aparicoes(hist,d);
+  if(a.length<3) return 5;
+
+  let p=[];
+  for(let i=1;i<a.length;i++) p.push(a[i]-a[i-1]);
+
+  let m=p.reduce((s,x)=>s+x,0)/p.length;
+  let v=p.reduce((s,x)=>s+(x-m)*(x-m),0)/p.length;
+
+  return Math.sqrt(v)||1;
+}
+
+/*
+Hazard empírico suavizado:
+entre ocasiões históricas que chegaram ao passo atual,
+quantas terminaram exatamente naquele passo.
+*/
+function hazard(hist,d,pAtual){
+  let a=aparicoes(hist,d);
+  if(a.length<3) return .10;
+
+  let passos=[];
+  for(let i=1;i<a.length;i++) passos.push(a[i]-a[i-1]);
+
+  let chegou=passos.filter(x=>x>=pAtual).length;
+  let saiu=passos.filter(x=>x===pAtual).length;
+
+  // suavização em torno do baseline 10%
+  return (saiu+1)/(chegou+10);
+}
+
+function faixa(p){
+  if(p<=3)return 0;
+  if(p<=6)return 1;
+  if(p<=10)return 2;
+  if(p<=15)return 3;
+  return 4;
+}
+
+/*
+Calcula taxas das faixas apenas no passado.
+*/
+function taxasFaixas(hist){
+  let sel=[0,0,0,0,0];
+  let ac=[0,0,0,0,0];
+
+  if(hist.length<35) return [0.10,0.10,0.10,0.10,0.10];
+
+  for(let t=25;t<hist.length;t++){
+    let passado=hist.slice(0,t);
+    let resultado=hist[t].dezenas;
+
+    for(let d=1;d<=60;d++){
+      let p=passoAtual(passado,d);
+      let f=faixa(p);
+      sel[f]++;
+      if(resultado.includes(d)) ac[f]++;
+    }
+  }
+
+  return sel.map((n,i)=>(ac[i]+2)/(n+20));
+}
+
+function features(hist,d,tf){
+  let p=passoAtual(hist,d);
+  let mp=mediaPassos(hist,d);
+  let dp=desvioPassos(hist,d);
+
+  let z=(p-mp)/dp;
+
+  let f25=freq(hist,d,25);
+  let f50=freq(hist,d,50);
+  let f100=freq(hist,d,100);
+
+  let hz=hazard(hist,d,p);
+  let regime=tf[faixa(p)];
+
+  return {
+    p,mp,z,f25,f50,f100,hz,regime
+  };
+}
+
+/*
+Família de modelos.
+Os pesos NÃO são ajustados ao 3067.
+A escolha é feita exclusivamente pelo walk-forward interno.
+*/
+const modelos=[];
+
+for(let wh of [0,1,2,3])
+for(let wr of [0,1,2])
+for(let w25 of [-1,0,1,2])
+for(let w50 of [-1,0,1])
+for(let w100 of [-1,0,1])
+for(let wz of [-1,0,1]){
+  if(
+    wh===0 && wr===0 &&
+    w25===0 && w50===0 &&
+    w100===0 && wz===0
+  ) continue;
+
+  modelos.push({wh,wr,w25,w50,w100,wz});
+}
+
+function score(ft,m){
+  /*
+  Valores centrados aproximadamente no baseline.
+  O ranking importa mais que a escala absoluta.
+  */
+  let s=0;
+
+  s += m.wh   * (ft.hz-.10)*10;
+  s += m.wr   * (ft.regime-.10)*10;
+
+  s += m.w25  * (ft.f25-.10)*5;
+  s += m.w50  * (ft.f50-.10)*5;
+  s += m.w100 * (ft.f100-.10)*5;
+
+  // limita extremos
+  let z=Math.max(-2.5,Math.min(2.5,ft.z));
+  s += m.wz*z*.15;
+
+  return s;
+}
+
+function ranking(hist,m){
+  let tf=taxasFaixas(hist);
+  let r=[];
+
+  for(let d=1;d<=60;d++){
+    let ft=features(hist,d,tf);
+    r.push({
+      d,
+      score:score(ft,m),
+      ...ft
+    });
+  }
+
+  r.sort((a,b)=>
+    b.score-a.score ||
+    a.d-b.d
+  );
+
+  return r;
+}
+
+function testarModelo(hist,m,inicio){
+  let hits10=0;
+  let hits6=0;
+  let hits15=0;
+  let hits20=0;
+  let hits25=0;
+  let hits30=0;
+  let testes=0;
+  let dist=Array(7).fill(0);
+
+  for(let t=inicio;t<hist.length;t++){
+    let passado=hist.slice(0,t);
+    let real=hist[t].dezenas;
+    let r=ranking(passado,m);
+
+    function h(k){
+      let top=new Set(r.slice(0,k).map(x=>x.d));
+      return real.filter(x=>top.has(x)).length;
+    }
+
+    let h10=h(10);
+
+    hits6+=h(6);
+    hits10+=h10;
+    hits15+=h(15);
+    hits20+=h(20);
+    hits25+=h(25);
+    hits30+=h(30);
+
+    dist[h10]++;
+    testes++;
+  }
+
+  return {
+    testes,
+    m6:hits6/testes,
+    m10:hits10/testes,
+    m15:hits15/testes,
+    m20:hits20/testes,
+    m25:hits25/testes,
+    m30:hits30/testes,
+    dist
+  };
+}
+
+function fmt(x,n=3){
+  return Number(x).toFixed(n);
+}
+
+function pct(x){
+  return (100*x).toFixed(1)+"%";
+}
+
+function executar(){
+
+  let hist=parseDados(document.getElementById("dados").value);
+  let out=document.getElementById("saida");
+
+  if(hist.length<60){
+    out.innerHTML=
+    '<div class="card"><h2>Histórico insuficiente</h2>'+
+    '<p>Foram reconhecidos apenas '+hist.length+' concursos.</p></div>';
+    return;
+  }
+
+  /*
+  Reserva os 25 concursos finais como validação interna.
+  A seleção do modelo ocorre antes deles.
+  */
+  let corte=Math.max(40,hist.length-25);
+
+  let treino=hist.slice(0,corte);
+
+  let inicioTreino=Math.max(30,treino.length-100);
+
+  let resultados=[];
+
+  for(let m of modelos){
+    let bt=testarModelo(treino,m,inicioTreino);
+
+    /*
+    Critério principal = Top10.
+    Penaliza modelo que só melhora grupos grandes.
+    */
+    let objetivo=
+      (bt.m10-1.0)*5 +
+      (bt.m6-.6)*2 +
+      (bt.m15-1.5)*1 +
+      (bt.m20-2.0)*.5;
+
+    resultados.push({m,bt,objetivo});
+  }
+
+  resultados.sort((a,b)=>b.objetivo-a.objetivo);
+
+  /*
+  Não escolhemos apenas o campeão:
+  fazemos consenso dos melhores modelos,
+  reduzindo risco de overfitting.
+  */
+  let elite=resultados.slice(0,10);
+
+  function rankingElite(h){
+    let soma=new Map();
+    let detalhes=new Map();
+
+    for(let e of elite){
+      let r=ranking(h,e.m);
+
+      r.forEach((x,i)=>{
+        soma.set(x.d,(soma.get(x.d)||0)+(i+1));
+        detalhes.set(x.d,x);
+      });
+    }
+
+    let final=[];
+
+    for(let d=1;d<=60;d++){
+      final.push({
+        d,
+        consenso:soma.get(d)/elite.length,
+        ...detalhes.get(d)
+      });
+    }
+
+    final.sort((a,b)=>
+      a.consenso-b.consenso ||
+      a.d-b.d
+    );
+
+    return final;
+  }
+
+  /*
+  Validação nos 25 concursos que não participaram
+  da escolha dos modelos.
+  */
+  let validHits=0;
+  let validDist=Array(7).fill(0);
+  let validDetalhes=[];
+
+  for(let t=corte;t<hist.length;t++){
+    let passado=hist.slice(0,t);
+    let real=hist[t].dezenas;
+    let r=rankingElite(passado);
+
+    let top=new Set(r.slice(0,10).map(x=>x.d));
+    let h=real.filter(x=>top.has(x)).length;
+
+    validHits+=h;
+    validDist[h]++;
+
+    validDetalhes.push({
+      concurso:hist[t].concurso,
+      hits:h
+    });
+  }
+
+  let mediaValid=validHits/(hist.length-corte);
+
+  /*
+  Ranking para o próximo concurso.
+  */
+  let final=rankingElite(hist);
+  let top10=final.slice(0,10);
+
+  let primeiro=hist[0].concurso;
+  let ultimo=hist[hist.length-1].concurso;
+
+  let html='';
+
+  html+=`
+  <div class="card">
+    <h2>V8 CONCLUÍDA</h2>
+    <p><b>${hist.length}</b> concursos reconhecidos.</p>
+    <p>Intervalo: <b>${primeiro}</b> até <b>${ultimo}</b></p>
+    <p>Concurso alvo: <b>${ultimo+1}</b></p>
+    <p class="sub">
+    Seleção dos modelos e validação foram separadas.
+    Os últimos ${hist.length-corte} concursos funcionaram como validação interna.
+    </p>
+  </div>`;
+
+  html+=`
+  <div class="card">
+    <h2>VALIDAÇÃO FORA DO TREINO — TOP 10</h2>
+    <div class="big">${fmt(mediaValid)} / 6</div>
+    <p>Baseline aleatório: <b>1.000 / 6</b></p>
+    <p>Diferença:
+      <span class="${mediaValid>1?'good':mediaValid<1?'bad':'warn'}">
+      ${mediaValid>=1?'+':''}${fmt(mediaValid-1)}
+      </span>
+    </p>
+    <p>Lift:
+      <b>${fmt(mediaValid,3)}×</b>
+    </p>
+  </div>`;
+
+  html+=`
+  <div class="card">
+    <h2>DISTRIBUIÇÃO — VALIDAÇÃO TOP 10</h2>
+    <div class="scroll">
+    <table>
+      <tr><th>Acertos</th><th>Concursos</th><th>%</th></tr>`;
+
+  let nv=hist.length-corte;
+
+  for(let i=0;i<=6;i++){
+    html+=`
+      <tr>
+       <td>${i}/6</td>
+       <td>${validDist[i]}</td>
+       <td>${pct(validDist[i]/nv)}</td>
+      </tr>`;
+  }
+
+  html+=`</table></div></div>`;
+
+  html+=`
+  <div class="card">
+    <h2>TOP 10 — V8</h2>
+    <div class="bolas">`;
+
+  for(let x of top10){
+    html+=`<div class="bola">${String(x.d).padStart(2,'0')}</div>`;
+  }
+
+  html+=`</div></div>`;
+
+  html+=`
+  <div class="card">
+    <h2>RANKING V8 — 60 DEZENAS</h2>
+    <p class="sub">
+    “Consenso” é a posição média da dezena nos dez melhores
+    modelos encontrados no treinamento. Quanto menor, melhor.
+    </p>
+    <div class="scroll">
+    <table>
+    <tr>
+      <th>#</th>
+      <th>Dez</th>
+      <th>Consenso</th>
+      <th>Passo</th>
+      <th>Hazard</th>
+      <th>Regime</th>
+      <th>F25</th>
+      <th>F50</th>
+    </tr>`;
+
+  final.forEach((x,i)=>{
+    html+=`
+    <tr>
+      <td>${i+1}</td>
+      <td><b>${String(x.d).padStart(2,'0')}</b></td>
+      <td>${fmt(x.consenso,1)}</td>
+      <td>${x.p}</td>
+      <td>${pct(x.hz)}</td>
+      <td>${pct(x.regime)}</td>
+      <td>${pct(x.f25)}</td>
+      <td>${pct(x.f50)}</td>
+    </tr>`;
+  });
+
+  html+=`</table></div></div>`;
+
+  html+=`
+  <div class="card">
+    <h2>10 MODELOS DO CONSENSO</h2>
+    <div class="scroll">
+    <table>
+    <tr>
+      <th>#</th>
+      <th>Top10 treino</th>
+      <th>Top6</th>
+      <th>Top15</th>
+    </tr>`;
+
+  elite.forEach((e,i)=>{
+    html+=`
+    <tr>
+      <td>${i+1}</td>
+      <td>${fmt(e.bt.m10)}</td>
+      <td>${fmt(e.bt.m6)}</td>
+      <td>${fmt(e.bt.m15)}</td>
+    </tr>`;
+  });
+
+  html+=`</table></div></div>`;
+
+  html+=`
+  <div class="card">
+    <h2>ÚLTIMOS TESTES DA VALIDAÇÃO</h2>
+    <div class="scroll">
+    <table>
+      <tr><th>Concurso</th><th>Acertos Top10</th></tr>`;
+
+  validDetalhes.slice().reverse().forEach(x=>{
+    html+=`
+    <tr>
+      <td>${x.concurso}</td>
+      <td><b>${x.hits}/6</b></td>
+    </tr>`;
+  });
+
+  html+=`</table></div></div>`;
+
+  html+=`
+  <div class="card">
+    <h2>IMPORTANTE</h2>
+    <p class="sub">
+    Esta ferramenta mede associações históricas e não transforma
+    sorteios aleatórios em eventos previsíveis. O concurso 3067
+    deve permanecer fora desta otimização para funcionar como
+    teste externo final.
+    </p>
+  </div>`;
+
+  out.innerHTML=html;
+}
+
+</script>
+</body>
+</html>
