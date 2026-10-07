@@ -1,0 +1,574 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+
+<title>Mega Passos V3</title>
+
+<style>
+body{
+  font-family:Arial,sans-serif;
+  background:#07111f;
+  color:#fff;
+  margin:0;
+  padding:18px;
+}
+.container{
+  max-width:1100px;
+  margin:auto;
+}
+h1{margin-bottom:5px}
+.sub{
+  color:#aeb9c9;
+  margin-bottom:20px;
+  line-height:1.4;
+}
+textarea{
+  width:100%;
+  height:300px;
+  box-sizing:border-box;
+  background:#111d2e;
+  color:#fff;
+  border:2px solid #43516a;
+  border-radius:14px;
+  padding:14px;
+  font-size:16px;
+}
+button{
+  width:100%;
+  padding:18px;
+  margin-top:15px;
+  background:#65cf88;
+  border:0;
+  border-radius:14px;
+  font-size:20px;
+  font-weight:bold;
+}
+.card{
+  background:#111d2e;
+  border-radius:15px;
+  padding:16px;
+  margin-top:18px;
+}
+.bolas{
+  display:flex;
+  flex-wrap:wrap;
+  gap:10px;
+}
+.bola{
+  background:#65cf88;
+  color:#04130a;
+  width:62px;
+  height:62px;
+  border-radius:50%;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  font-size:22px;
+  font-weight:bold;
+}
+.scroll{overflow-x:auto}
+table{
+  width:100%;
+  border-collapse:collapse;
+  margin-top:12px;
+  font-size:13px;
+  white-space:nowrap;
+}
+th,td{
+  padding:9px 6px;
+  border-bottom:1px solid #334156;
+  text-align:center;
+}
+th{color:#9fe2b4}
+.green{
+  color:#65cf88;
+  font-weight:bold;
+}
+.small{
+  color:#aeb9c9;
+  font-size:13px;
+  line-height:1.4;
+}
+</style>
+</head>
+
+<body>
+
+<div class="container">
+
+<h1>MEGA PASSOS V3</h1>
+
+<div class="sub">
+Modelo experimental baseado na taxa condicional dos passos.
+O cálculo mede quantas vezes cada dezena chegou ao passo atual
+e quantas vezes saiu exatamente nesse estágio.
+</div>
+
+<textarea id="historico"
+placeholder="Cole o histórico:
+3067 01 04 17 33 41 52
+3066 04 06 09 13 28 48
+..."></textarea>
+
+<button onclick="analisar()">ANALISAR PASSOS V3</button>
+
+<div id="status" class="card">
+Aguardando dados...
+</div>
+
+<div id="resultado" style="display:none">
+
+<h2>TOP 10 — PASSO CONDICIONAL</h2>
+
+<div id="bolas" class="bolas"></div>
+
+<div class="card">
+
+<h2>Ranking das 60 dezenas</h2>
+
+<div class="small">
+Taxa = saídas exatamente no passo atual ÷ oportunidades históricas
+de atingir esse passo.<br><br>
+
+Taxa Ajust. utiliza suavização estatística para reduzir distorções
+causadas por amostras pequenas.
+</div>
+
+<div class="scroll">
+
+<table>
+
+<thead>
+<tr>
+<th>#</th>
+<th>Dez</th>
+<th>Passo</th>
+<th>Chegou</th>
+<th>Saiu</th>
+<th>Taxa</th>
+<th>Taxa Ajust.</th>
+<th>Média</th>
+<th>Mediana</th>
+<th>F25</th>
+<th>F50</th>
+<th>Score</th>
+</tr>
+</thead>
+
+<tbody id="tabela"></tbody>
+
+</table>
+
+</div>
+</div>
+</div>
+</div>
+
+<script>
+
+function mediana(a){
+
+ if(!a.length) return 0;
+
+ const x=[...a].sort((a,b)=>a-b);
+
+ const m=Math.floor(x.length/2);
+
+ return x.length%2
+ ? x[m]
+ : (x[m-1]+x[m])/2;
+}
+
+/*
+==================================================
+MOTOR DE PASSO CONDICIONAL
+==================================================
+
+Exemplo:
+
+Passos históricos:
+3, 8, 5, 8, 12
+
+Se passo atual = 8:
+
+CHEGOU AO 8:
+8,8,12 = 3 oportunidades
+
+SAIU NO 8:
+8,8 = 2 ocorrências
+
+Taxa condicional:
+2 / 3 = 66,7%
+
+Isso é diferente de simplesmente contar
+quantas vezes o passo 8 apareceu.
+==================================================
+*/
+
+function analisar(){
+
+ const texto=
+ document.getElementById("historico")
+ .value.trim();
+
+ if(!texto){
+
+   document.getElementById("status").innerHTML=
+   "Cole o histórico.";
+
+   return;
+ }
+
+ let concursos=[];
+
+ texto.split(/\n+/).forEach(l=>{
+
+   const n=
+   l.trim()
+   .split(/\s+/)
+   .map(Number);
+
+   if(n.length>=7){
+
+     const concurso=n[0];
+     const dezenas=n.slice(1,7);
+
+     if(
+       Number.isInteger(concurso) &&
+       dezenas.every(
+         x=>Number.isInteger(x) &&
+         x>=1 &&
+         x<=60
+       ) &&
+       new Set(dezenas).size===6
+     ){
+
+       concursos.push({
+         concurso,
+         dezenas
+       });
+     }
+   }
+ });
+
+ /*
+ Remove duplicidades
+ */
+
+ const mapa=new Map();
+
+ concursos.forEach(c=>{
+   mapa.set(c.concurso,c);
+ });
+
+ concursos=
+ [...mapa.values()]
+ .sort((a,b)=>a.concurso-b.concurso);
+
+ if(concursos.length<20){
+
+   document.getElementById("status").innerHTML=
+   "Histórico insuficiente.";
+
+   return;
+ }
+
+ let ranking=[];
+
+ for(let dez=1;dez<=60;dez++){
+
+   let aparicoes=[];
+
+   concursos.forEach((c,i)=>{
+
+     if(c.dezenas.includes(dez)){
+       aparicoes.push(i);
+     }
+
+   });
+
+   let passos=[];
+
+   for(let i=1;i<aparicoes.length;i++){
+
+     passos.push(
+       aparicoes[i]-
+       aparicoes[i-1]
+     );
+
+   }
+
+   /*
+   PASSO ATUAL
+
+   Se saiu no último concurso:
+   passo atual = 1
+
+   Se está há um concurso sem sair:
+   passo atual = 2
+   */
+
+   let atual;
+
+   if(aparicoes.length){
+
+     atual=
+     concursos.length-
+     aparicoes[aparicoes.length-1];
+
+   }else{
+
+     atual=concursos.length;
+
+   }
+
+   /*
+   Número de intervalos históricos
+   que conseguiram atingir o passo atual.
+   */
+
+   const chegou=
+   passos.filter(
+     p=>p>=atual
+   ).length;
+
+   /*
+   Número de intervalos encerrados
+   exatamente no passo atual.
+   */
+
+   const saiu=
+   passos.filter(
+     p=>p===atual
+   ).length;
+
+   /*
+   TAXA CONDICIONAL BRUTA
+   */
+
+   const taxa=
+   chegou
+   ? saiu/chegou
+   : 0;
+
+   /*
+   SUAVIZAÇÃO BETA
+
+   Prior aproximado:
+   1 sucesso / 10 oportunidades.
+
+   Evita, por exemplo:
+   1 saída em 1 oportunidade = 100%.
+   */
+
+   const alpha=1;
+   const beta=9;
+
+   const taxaAjust=
+   (saiu+alpha)/
+   (chegou+alpha+beta);
+
+   const media=
+   passos.length
+   ? passos.reduce((a,b)=>a+b,0)/
+     passos.length
+   : 0;
+
+   const med=
+   mediana(passos);
+
+   const f25=
+   concursos.slice(-25)
+   .filter(c=>c.dezenas.includes(dez))
+   .length;
+
+   const f50=
+   concursos.slice(-50)
+   .filter(c=>c.dezenas.includes(dez))
+   .length;
+
+   /*
+   COMPONENTE DE CONFIANÇA
+
+   Cresce com o número de oportunidades,
+   mas é limitado a 1.
+   */
+
+   const confianca=
+   Math.min(
+     1,
+     chegou/10
+   );
+
+   /*
+   SCORE V3
+
+   70% taxa condicional ajustada
+   15% confiança da amostra
+   10% frequência 25
+    5% frequência 50
+
+   Importante:
+   não utilizamos o resultado futuro.
+   */
+
+   const scoreTaxa=
+   taxaAjust*100;
+
+   const scoreConf=
+   confianca*100;
+
+   const score25=
+   Math.min(
+     100,
+     (f25/10)*100
+   );
+
+   const score50=
+   Math.min(
+     100,
+     (f50/20)*100
+   );
+
+   const score=
+   scoreTaxa*0.70+
+   scoreConf*0.15+
+   score25*0.10+
+   score50*0.05;
+
+   ranking.push({
+
+     dez,
+     atual,
+     chegou,
+     saiu,
+     taxa,
+     taxaAjust,
+     media,
+     med,
+     f25,
+     f50,
+     score
+
+   });
+
+ }
+
+ ranking.sort((a,b)=>{
+
+   if(b.score!==a.score)
+     return b.score-a.score;
+
+   if(b.taxaAjust!==a.taxaAjust)
+     return b.taxaAjust-a.taxaAjust;
+
+   return a.dez-b.dez;
+
+ });
+
+ const primeiro=
+ concursos[0].concurso;
+
+ const ultimo=
+ concursos[concursos.length-1].concurso;
+
+ document.getElementById("status").innerHTML=
+
+ `<b>ANÁLISE V3 CONCLUÍDA</b><br>
+ ${concursos.length} concursos reconhecidos.<br>
+ Intervalo: ${primeiro} até ${ultimo}<br>
+ Concurso alvo: ${ultimo+1}`;
+
+ /*
+ TOP 10
+ */
+
+ const bolas=
+ document.getElementById("bolas");
+
+ bolas.innerHTML="";
+
+ ranking.slice(0,10)
+ .forEach(r=>{
+
+   const b=
+   document.createElement("div");
+
+   b.className="bola";
+
+   b.textContent=
+   String(r.dez).padStart(2,"0");
+
+   bolas.appendChild(b);
+
+ });
+
+ /*
+ TABELA COMPLETA
+ */
+
+ const tabela=
+ document.getElementById("tabela");
+
+ tabela.innerHTML="";
+
+ ranking.forEach((r,i)=>{
+
+   const tr=
+   document.createElement("tr");
+
+   tr.innerHTML=`
+
+   <td>${i+1}</td>
+
+   <td class="green">
+   ${String(r.dez).padStart(2,"0")}
+   </td>
+
+   <td>${r.atual}</td>
+
+   <td>${r.chegou}</td>
+
+   <td>${r.saiu}</td>
+
+   <td>
+   ${(r.taxa*100).toFixed(1)}%
+   </td>
+
+   <td class="green">
+   ${(r.taxaAjust*100).toFixed(1)}%
+   </td>
+
+   <td>
+   ${r.media.toFixed(2)}
+   </td>
+
+   <td>
+   ${r.med}
+   </td>
+
+   <td>${r.f25}</td>
+
+   <td>${r.f50}</td>
+
+   <td class="green">
+   ${r.score.toFixed(2)}
+   </td>
+
+   `;
+
+   tabela.appendChild(tr);
+
+ });
+
+ document.getElementById("resultado")
+ .style.display="block";
+
+}
+
+</script>
+
+</body>
+</html>
