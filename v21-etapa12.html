@@ -1,0 +1,210 @@
+
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Mega Passos V21 — Etapa 12</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#07111f;color:#f4f7fb;font-family:Arial,sans-serif}
+main{max-width:1050px;margin:auto;padding:20px 15px 70px}
+h1{font-size:29px}h2{font-size:22px}
+p{line-height:1.55;color:#bac5d8}
+.card{background:#172238;border-radius:19px;padding:20px;margin:20px 0}
+textarea{width:100%;height:180px;background:#0a1425;color:white;border:1px solid #506078;border-radius:10px;padding:12px;font-size:13px}
+button{background:#26a579;color:white;border:0;border-radius:10px;padding:15px 20px;font-size:16px;font-weight:bold;width:100%;margin-top:12px}
+table{border-collapse:collapse;width:100%;min-width:650px}
+th,td{padding:11px;border-bottom:1px solid #43516b;text-align:center;white-space:nowrap}
+th{color:#a8d5ae}td:first-child{text-align:left;font-weight:bold}
+.scroll{overflow-x:auto}
+.good{color:#9bdaa5}.bad{color:#f18d8d}
+small{color:#aebbd0}
+#status{color:#b4dfb6}
+</style>
+</head>
+<body>
+<main>
+<h1>Mega Passos V21</h1>
+<p>Etapa 12 — Auditoria individual dos componentes M5</p>
+
+<section class="card">
+<h2>1. Histórico dos concursos</h2>
+<p>Cole os concursos de 1 até 3066. Formato: concurso seguido das seis dezenas, separados por espaços.</p>
+<textarea id="dados" placeholder="1 04 05 30 33 41 52&#10;2 09 37 39 41 43 49"></textarea>
+<button onclick="executar()">Executar auditoria V21</button>
+<p id="status">Aguardando histórico.</p>
+</section>
+
+<div id="saida"></div>
+</main>
+
+<script>
+const nomes=["Hazard","Regime","F25","F50","F100","M5 original"];
+const cortes=[6,10,15,20,25,30,40];
+const faixa=p=>p<=3?0:p<=6?1:p<=10?2:p<=15?3:4;
+const media=a=>a.reduce((s,v)=>s+v,0)/a.length;
+const fmt=n=>Number(n).toFixed(3);
+
+function ler(texto){
+ const linhas=texto.trim().split(/\n+/);
+ const hist=[], vistos=new Set();
+ for(const linha of linhas){
+  const a=linha.trim().split(/[\s,;]+/).map(Number);
+  if(a.length!==7||a.some(x=>!Number.isInteger(x)))throw Error("Linha inválida: "+linha);
+  const [concurso,...nums]=a;
+  if(concurso<1||vistos.has(concurso)||nums.some(n=>n<1||n>60)||new Set(nums).size!==6)
+   throw Error("Concurso inválido ou duplicado: "+concurso);
+  vistos.add(concurso);
+  hist.push({concurso,nums});
+ }
+ hist.sort((a,b)=>a.concurso-b.concurso);
+ for(let i=0;i<hist.length;i++)
+  if(hist[i].concurso!==i+1)throw Error("Histórico incompleto no concurso "+(i+1));
+ if(hist.length!==3066)throw Error("São necessários exatamente os concursos 1–3066. Encontrados: "+hist.length);
+ return hist;
+}
+
+function pontuar(hist,t){
+ const anterior=hist.slice(0,t);
+ const ult25=anterior.slice(-25),ult50=anterior.slice(-50),ult100=anterior.slice(-100);
+ const presencas=Array.from({length:61},()=>[]);
+ for(let i=0;i<t;i++)
+  for(const n of hist[i].nums)presencas[n].push(i);
+
+ const atual=[],hz=[],f25=[],f50=[],f100=[];
+ for(let n=1;n<=60;n++){
+  const pos=presencas[n];
+  const passo=pos.length?t-pos[pos.length-1]:t+1;
+  atual[n]=passo;
+  const gaps=[];
+  for(let j=1;j<pos.length;j++)gaps.push(pos[j]-pos[j-1]);
+  const risco=gaps.filter(g=>g>=passo).length;
+  const evento=gaps.filter(g=>g===passo).length;
+  hz[n]=(evento+1)/(risco+10);
+  f25[n]=ult25.filter(c=>c.nums.includes(n)).length/25;
+  f50[n]=ult50.filter(c=>c.nums.includes(n)).length/50;
+  f100[n]=ult100.filter(c=>c.nums.includes(n)).length/100;
+ }
+
+ // Regimes calculados exclusivamente com sorteios anteriores ao alvo.
+ const chegadas=Array(5).fill(0),acertos=Array(5).fill(0);
+ const inicio=Math.max(30,t-150);
+ for(let i=inicio;i<t;i++){
+  const sorteadas=new Set(hist[i].nums);
+  for(let n=1;n<=60;n++){
+   const pos=presencas[n];
+   let j=pos.length-1;
+   while(j>=0&&pos[j]>=i)j--;
+   const passo=j>=0?i-pos[j]:i+1;
+   const b=faixa(passo);
+   chegadas[b]++;
+   if(sorteadas.has(n))acertos[b]++;
+  }
+ }
+ const regime=chegadas.map((v,b)=>((acertos[b]+2)/(v+20))/.1);
+ const resultados=nomes.map(()=>[]);
+ for(let n=1;n<=60;n++){
+  const r=regime[faixa(atual[n])];
+  resultados[0].push({n,s:hz[n]});
+  resultados[1].push({n,s:r});
+  resultados[2].push({n,s:f25[n]});
+  resultados[3].push({n,s:f50[n]});
+  resultados[4].push({n,s:f100[n]});
+  const m5=hz[n]*.35+r*.25+f25[n]*.15+f50[n]*.15+f100[n]*.10;
+  resultados[5].push({n,s:m5});
+ }
+ for(const a of resultados)a.sort((x,y)=>y.s-x.s||x.n-y.n);
+ return resultados;
+}
+
+function tabela(cab,linhas){
+ return '<div class="scroll"><table><thead><tr>'+
+ cab.map(c=>'<th>'+c+'</th>').join('')+
+ '</tr></thead><tbody>'+linhas.map(l=>'<tr>'+l.map(x=>'<td>'+x+'</td>').join('')+'</tr>').join('')+
+ '</tbody></table></div>';
+}
+
+function executar(){
+ const saida=document.getElementById("saida");
+ const status=document.getElementById("status");
+ saida.innerHTML="";
+ try{
+  const hist=ler(document.getElementById("dados").value);
+  status.textContent="Processando 2.966 concursos em ordem cronológica...";
+  setTimeout(()=>{
+   try{calcular(hist);status.textContent="Auditoria concluída."}
+   catch(e){status.textContent="Erro: "+e.message}
+  },50);
+ }catch(e){status.textContent="Erro: "+e.message}
+}
+
+function calcular(hist){
+ const dev=Array.from({length:6},()=>Array(cortes.length).fill(0));
+ const oos=Array.from({length:6},()=>Array(cortes.length).fill(0));
+ const blocos=Array.from({length:6},()=>Array(6).fill(0));
+ const nblocos=Array(6).fill(0);
+ const nd=2076,no=890;
+
+ for(let t=100;t<hist.length;t++){
+  const rankings=pontuar(hist,t);
+  const sorteio=new Set(hist[t].nums);
+  const teste=t>=2176;
+  const b=Math.min(5,Math.floor((t-100)/500));
+  nblocos[b]++;
+  for(let m=0;m<6;m++){
+   const lista=rankings[m];
+   for(let k=0;k<cortes.length;k++){
+    let hits=0;
+    for(let j=0;j<cortes[k];j++)if(sorteio.has(lista[j].n))hits++;
+    (teste?oos:dev)[m][k]+=hits;
+    if(k===1)blocos[m][b]+=hits;
+   }
+  }
+ }
+
+ let html='<section class="card"><h2>2. Comparação DEV × OOS</h2>'+
+ '<p>DEV: concursos 101–2176 (2.076 testes). OOS: 2177–3066 (890 testes). A seleção do ranking usa apenas concursos anteriores ao sorteio avaliado.</p>';
+ html+=tabela(["Componente","Top6 DEV","Top10 DEV","Top10 OOS","Top15 OOS","Top20 OOS","Top40 OOS"],
+ nomes.map((nome,m)=>{
+  const x=oos[m][1]/no;
+  return [nome,fmt(dev[m][0]/nd),fmt(dev[m][1]/nd),
+   '<span class="'+(x>1?"good":"bad")+'">'+fmt(x)+'</span>',
+   fmt(oos[m][2]/no),fmt(oos[m][3]/no),fmt(oos[m][6]/no)];
+ }));
+ html+='</section>';
+
+ html+='<section class="card"><h2>3. Todos os cortes OOS</h2>'+
+ '<p>Referência aleatória: TopK = K ÷ 10 acertos por concurso.</p>';
+ html+=tabela(["Componente",...cortes.map(k=>"Top"+k)],
+ nomes.map((nome,m)=>[nome,...cortes.map((k,j)=>fmt(oos[m][j]/no))]));
+ html+='</section>';
+
+ html+='<section class="card"><h2>4. Estabilidade por época</h2>'+
+ '<p>Média de acertos Top10 por concurso, com ranking reconstruído antes de cada sorteio.</p>';
+ html+=tabela(["Modelo",...nblocos.map((n,b)=>"B"+(b+1)+" ("+n+")")],
+ nomes.map((nome,m)=>[nome,...nblocos.map((n,b)=>fmt(blocos[m][b]/n))]));
+ html+='</section>';
+
+ html+='<section class="card"><h2>5. Comparação com o acaso</h2>';
+ const base=1, se=Math.sqrt((10*.1*.9*(60-10)/(60-1))/no);
+ html+=tabela(["Componente","Top10 OOS","Diferença","Z aprox.","IC95% da média"],
+ nomes.map((nome,m)=>{
+  const x=oos[m][1]/no;
+  return [nome,fmt(x),fmt(x-base),fmt((x-base)/se),
+  fmt(x-1.96*se)+" – "+fmt(x+1.96*se)];
+ }));
+ html+='<p><small>Intervalos e Z aproximados, sem ajuste para múltiplas comparações. Um resultado isolado acima de 1,000 não comprova vantagem preditiva.</small></p></section>';
+
+ const melhor=nomes.map((nome,m)=>({nome,valor:oos[m][1]/no})).sort((a,b)=>b.valor-a.valor)[0];
+ html+='<section class="card"><h2>6. Diagnóstico</h2>'+
+ '<p>Maior média Top10 OOS observada: <strong>'+melhor.nome+' — '+fmt(melhor.valor)+
+ '</strong>. Essa classificação é descritiva e não constitui validação de um novo modelo.</p>'+
+ '<p>Os componentes foram comparados em uma mesma amostra OOS. A escolha do vencedor com base nesses resultados exigirá novos sorteios futuros para confirmação independente.</p>'+
+ '<p><strong>Controle:</strong> nenhuma alteração automática dos pesos do M5.</p></section>';
+
+ document.getElementById("saida").innerHTML=html;
+}
+</script>
+</body>
+</html>
