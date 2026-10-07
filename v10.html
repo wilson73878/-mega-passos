@@ -1,0 +1,885 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Mega Passos V10 — Validação Robusta</title>
+
+<style>
+*{box-sizing:border-box}
+body{
+ margin:0;background:#07111f;color:#f4f7fb;
+ font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif
+}
+.container{max-width:950px;margin:auto;padding:24px 18px 80px}
+h1{font-size:34px;margin-bottom:8px}
+h2{font-size:27px;margin-top:0}
+.sub{color:#aab6c9;line-height:1.55}
+.card{
+ background:#152136;border-radius:24px;
+ padding:24px;margin-top:22px;overflow:auto
+}
+textarea{
+ width:100%;height:270px;background:#0b1628;color:white;
+ border:2px solid #43516b;border-radius:18px;
+ padding:16px;font-size:16px
+}
+button{
+ width:100%;margin-top:18px;padding:20px;border:0;
+ border-radius:20px;background:#86d292;color:#1264ef;
+ font-weight:800;font-size:22px
+}
+button:disabled{opacity:.55}
+table{width:100%;border-collapse:collapse;min-width:620px}
+th,td{
+ padding:11px 8px;border-bottom:1px solid #43516b;
+ text-align:center;white-space:nowrap
+}
+th{color:#9bd5a3}
+.good{color:#86d292;font-weight:800}
+.bad{color:#ff8989;font-weight:800}
+.warn{color:#ffd06c;font-weight:800}
+.metric{font-size:31px;font-weight:800}
+.progress{
+ width:100%;height:17px;background:#26354b;
+ border-radius:10px;overflow:hidden;margin-top:14px
+}
+.bar{height:100%;width:0;background:#86d292}
+</style>
+</head>
+
+<body>
+<div class="container">
+
+<h1>MEGA PASSOS V10</h1>
+
+<p class="sub">
+Validação robusta do motor V9. Os modelos M0–M7 permanecem
+com exatamente as mesmas fórmulas da V9.
+</p>
+
+<div class="card">
+<h2>Histórico</h2>
+
+<p class="sub">
+Para preservar o teste cego, utilize somente concursos
+até <b>3066</b>. Não inclua o resultado 3067.
+</p>
+
+<textarea id="dados"
+placeholder="3066 04 06 09 13 28 48
+3065 08 10 30 38 50 53
+..."></textarea>
+
+<button id="btn" onclick="iniciar()">EXECUTAR V10</button>
+</div>
+
+<div id="status"></div>
+<div id="saida"></div>
+
+</div>
+
+<script>
+
+/* =========================
+   MOTOR ORIGINAL V9
+   ========================= */
+
+function parseDados(txt){
+ const linhas=txt.trim().split(/\n+/);
+ let arr=[];
+
+ for(const l of linhas){
+   const n=l.trim().split(/\s+/).map(Number);
+   if(n.length<7) continue;
+
+   const concurso=n[0];
+   const dezenas=n.slice(1,7);
+
+   if(!Number.isInteger(concurso)) continue;
+   if(new Set(dezenas).size!==6) continue;
+   if(dezenas.some(x=>x<1||x>60)) continue;
+
+   arr.push({concurso,dezenas});
+ }
+
+ arr.sort((a,b)=>a.concurso-b.concurso);
+ return arr;
+}
+
+function passoAtual(hist,d){
+ for(let i=hist.length-1;i>=0;i--){
+   if(hist[i].dezenas.includes(d))
+     return hist.length-i;
+ }
+ return hist.length+1;
+}
+
+function freq(hist,d,n){
+ const h=hist.slice(-n);
+ if(!h.length) return 0;
+
+ let c=0;
+ for(const x of h)
+   if(x.dezenas.includes(d)) c++;
+
+ return c/h.length;
+}
+
+function gaps(hist,d){
+ let pos=[];
+
+ hist.forEach((x,i)=>{
+   if(x.dezenas.includes(d)) pos.push(i);
+ });
+
+ let g=[];
+ for(let i=1;i<pos.length;i++)
+   g.push(pos[i]-pos[i-1]);
+
+ return g;
+}
+
+function media(a){
+ if(!a.length) return 0;
+ return a.reduce((s,x)=>s+x,0)/a.length;
+}
+
+function desvio(a){
+ if(a.length<2) return 0;
+
+ const m=media(a);
+
+ return Math.sqrt(
+   a.reduce((s,x)=>s+(x-m)*(x-m),0)/a.length
+ );
+}
+
+function hazard(hist,d){
+ const p=passoAtual(hist,d);
+ const gs=gaps(hist,d);
+
+ if(!gs.length) return .10;
+
+ let chegou=0;
+ let saiu=0;
+
+ for(const g of gs){
+   if(g>=p) chegou++;
+   if(g===p) saiu++;
+ }
+
+ return (saiu+1)/(chegou+10);
+}
+
+function faixa(p){
+ if(p<=3) return 0;
+ if(p<=6) return 1;
+ if(p<=10) return 2;
+ if(p<=15) return 3;
+ return 4;
+}
+
+function aprenderRegimes(hist){
+
+ let n=[0,0,0,0,0];
+ let ac=[0,0,0,0,0];
+
+ const inicio=Math.max(30,0);
+
+ for(let t=inicio;t<hist.length;t++){
+
+   const passado=hist.slice(0,t);
+   const real=new Set(hist[t].dezenas);
+
+   for(let d=1;d<=60;d++){
+
+     const f=faixa(passoAtual(passado,d));
+
+     n[f]++;
+
+     if(real.has(d))
+       ac[f]++;
+   }
+ }
+
+ return n.map((x,i)=>{
+   const taxa=(ac[i]+2)/(x+20);
+
+   return {
+     n:x,
+     ac:ac[i],
+     taxa,
+     lift:taxa/.10
+   };
+ });
+}
+
+/*
+M0–M7 COPIADOS DA V9 SEM ALTERAÇÃO
+*/
+
+function scoreModelo(hist,d,modelo,regimes){
+
+ const p=passoAtual(hist,d);
+ const hz=hazard(hist,d);
+
+ const f25=freq(hist,d,25);
+ const f50=freq(hist,d,50);
+ const f100=freq(hist,d,100);
+
+ const gs=gaps(hist,d);
+ const mg=media(gs);
+ const sd=desvio(gs);
+
+ const regime=regimes[faixa(p)].lift;
+
+ const z=sd>0 ? Math.abs(p-mg)/sd : 0;
+
+ switch(modelo){
+
+   case 0:
+     return hz;
+
+   case 1:
+     return regime;
+
+   case 2:
+     return hz*.65 + regime*.35;
+
+   case 3:
+     return hz*.50 + regime*.30 + f25*.20;
+
+   case 4:
+     return hz*.40 + regime*.30 + f50*.20 + f25*.10;
+
+   case 5:
+     return hz*.35 + regime*.25 +
+            f25*.15 + f50*.15 + f100*.10;
+
+   case 6:
+     return hz*.45 + regime*.35 +
+            (1/(1+z))*.20;
+
+   case 7:
+     return regime*.45 +
+            f25*.20 +
+            f50*.20 +
+            hz*.15;
+ }
+}
+
+function ranking(hist,modelo){
+
+ const regimes=aprenderRegimes(hist);
+
+ let r=[];
+
+ for(let d=1;d<=60;d++){
+
+   const p=passoAtual(hist,d);
+
+   r.push({
+     d,
+     score:scoreModelo(hist,d,modelo,regimes),
+     passo:p,
+     hazard:hazard(hist,d),
+     regime:regimes[faixa(p)].lift
+   });
+ }
+
+ r.sort((a,b)=>
+   b.score-a.score || a.d-b.d
+ );
+
+ return r;
+}
+
+function testarModelo(hist,modelo,inicio,fim){
+
+ let total=0;
+ let testes=0;
+
+ for(let t=inicio;t<fim;t++){
+
+   const passado=hist.slice(0,t);
+
+   if(passado.length<35) continue;
+
+   const top=ranking(passado,modelo)
+     .slice(0,10)
+     .map(x=>x.d);
+
+   const real=new Set(hist[t].dezenas);
+
+   total+=top.filter(x=>real.has(x)).length;
+   testes++;
+ }
+
+ return {
+   media:testes ? total/testes : 0,
+   testes
+ };
+}
+
+function escolherModelo(hist,fimTreino){
+
+ const inicio=Math.max(35,fimTreino-50);
+
+ let candidatos=[];
+
+ for(let m=0;m<8;m++){
+
+   const r=testarModelo(
+     hist,m,inicio,fimTreino
+   );
+
+   candidatos.push({
+     modelo:m,
+     media:r.media,
+     testes:r.testes
+   });
+ }
+
+ candidatos.sort((a,b)=>
+   b.media-a.media || a.modelo-b.modelo
+ );
+
+ return candidatos;
+}
+
+/* =========================
+   AUDITORIA V10
+   ========================= */
+
+function hitsCortes(rank,real){
+
+ const cortes=[6,10,15,20,25,30,40];
+ let resultado={};
+
+ for(const k of cortes){
+
+   const top=new Set(
+     rank.slice(0,k).map(x=>x.d)
+   );
+
+   resultado[k]=
+     [...real].filter(x=>top.has(x)).length;
+ }
+
+ return resultado;
+}
+
+function avaliarBloco(hist,inicio,fim,modo){
+
+ let soma={
+   6:0,10:0,15:0,20:0,25:0,30:0,40:0
+ };
+
+ let modelos=Array(8).fill(0);
+ let registros=[];
+
+ for(let t=inicio;t<fim;t++){
+
+   const passado=hist.slice(0,t);
+
+   let modelo;
+
+   if(modo==="M5"){
+     modelo=5;
+   }else{
+     const escolha=
+       escolherModelo(passado,passado.length);
+
+     modelo=escolha[0].modelo;
+   }
+
+   modelos[modelo]++;
+
+   const rank=ranking(passado,modelo);
+   const real=new Set(hist[t].dezenas);
+
+   const h=hitsCortes(rank,real);
+
+   Object.keys(soma).forEach(k=>{
+     soma[k]+=h[k];
+   });
+
+   registros.push({
+     concurso:hist[t].concurso,
+     modelo,
+     h
+   });
+ }
+
+ const n=fim-inicio;
+
+ let medias={};
+
+ Object.keys(soma).forEach(k=>{
+   medias[k]=soma[k]/n;
+ });
+
+ return {n,medias,modelos,registros};
+}
+
+function classe(media,base){
+
+ const d=media-base;
+
+ if(d>0.05) return "good";
+ if(d<-0.05) return "bad";
+ return "warn";
+}
+
+function fmt(x,n=3){
+ return Number(x).toFixed(n);
+}
+
+function pausa(){
+ return new Promise(r=>setTimeout(r,30));
+}
+
+async function iniciar(){
+
+ const btn=document.getElementById("btn");
+ const status=document.getElementById("status");
+ const out=document.getElementById("saida");
+
+ btn.disabled=true;
+ out.innerHTML="";
+
+ const hist=parseDados(
+   document.getElementById("dados").value
+ );
+
+ if(hist.length<100){
+
+   status.innerHTML=`
+   <div class="card">
+   <h2>Histórico insuficiente</h2>
+   <p>Reconhecidos: ${hist.length}</p>
+   </div>`;
+
+   btn.disabled=false;
+   return;
+ }
+
+ status.innerHTML=`
+ <div class="card">
+ <h2>PROCESSANDO V10...</h2>
+ <p id="progTxt">Preparando blocos...</p>
+ <div class="progress">
+ <div class="bar" id="bar"></div>
+ </div>
+ </div>`;
+
+ await pausa();
+
+ /*
+ Com 149 concursos:
+ 35–59
+ 60–84
+ 85–109
+ 110–134
+ 135–148
+
+ Assim avaliamos diferentes períodos,
+ não somente os últimos 25.
+ */
+
+ let inicio=35;
+ let blocos=[];
+
+ while(inicio<hist.length){
+
+   let fim=Math.min(
+     inicio+25,
+     hist.length
+   );
+
+   blocos.push({inicio,fim});
+
+   inicio=fim;
+ }
+
+ let resultados=[];
+
+ for(let i=0;i<blocos.length;i++){
+
+   let b=blocos[i];
+
+   document.getElementById("progTxt").innerText=
+     `Bloco ${i+1} de ${blocos.length} — seleção dinâmica`;
+
+   let dinamico=
+     avaliarBloco(
+       hist,b.inicio,b.fim,"DINAMICO"
+     );
+
+   document.getElementById("bar").style.width=
+     (10+70*(i+.5)/blocos.length)+"%";
+
+   await pausa();
+
+   document.getElementById("progTxt").innerText=
+     `Bloco ${i+1} de ${blocos.length} — M5 fixo`;
+
+   let m5=
+     avaliarBloco(
+       hist,b.inicio,b.fim,"M5"
+     );
+
+   resultados.push({
+     bloco:b,
+     dinamico,
+     m5
+   });
+
+   document.getElementById("bar").style.width=
+     (10+70*(i+1)/blocos.length)+"%";
+
+   await pausa();
+ }
+
+ /*
+ Consolidação global
+ */
+
+ function consolidar(tipo){
+
+   let total=0;
+
+   let soma={
+     6:0,10:0,15:0,20:0,25:0,30:0,40:0
+   };
+
+   for(const x of resultados){
+
+     let r=x[tipo];
+
+     total+=r.n;
+
+     Object.keys(soma).forEach(k=>{
+       soma[k]+=r.medias[k]*r.n;
+     });
+   }
+
+   let medias={};
+
+   Object.keys(soma).forEach(k=>{
+     medias[k]=soma[k]/total;
+   });
+
+   return {total,medias};
+ }
+
+ const globalD=consolidar("dinamico");
+ const globalM5=consolidar("m5");
+
+ document.getElementById("bar").style.width="90%";
+ document.getElementById("progTxt").innerText=
+   "Calculando ranking congelado para o concurso alvo...";
+
+ await pausa();
+
+ /*
+ Ranking para 3067 sem conhecer 3067
+ */
+
+ const escolhaFinal=
+   escolherModelo(hist,hist.length);
+
+ const modeloFinal=
+   escolhaFinal[0].modelo;
+
+ const rankFinal=
+   ranking(hist,modeloFinal);
+
+ document.getElementById("bar").style.width="100%";
+ document.getElementById("progTxt").innerText="Concluído.";
+
+ await pausa();
+
+ mostrar(
+   hist,
+   resultados,
+   globalD,
+   globalM5,
+   modeloFinal,
+   escolhaFinal,
+   rankFinal
+ );
+
+ btn.disabled=false;
+}
+
+function mostrar(
+ hist,
+ resultados,
+ globalD,
+ globalM5,
+ modeloFinal,
+ escolhaFinal,
+ rankFinal
+){
+
+ const cortes=[6,10,15,20,25,30,40];
+
+ let html=`
+
+ <div class="card">
+ <h2>V10 CONCLUÍDA</h2>
+
+ <p>
+ <b>${hist.length}</b> concursos reconhecidos.<br>
+ Intervalo:
+ <b>${hist[0].concurso}</b> até
+ <b>${hist[hist.length-1].concurso}</b><br>
+ Concurso externo reservado:
+ <b>${hist[hist.length-1].concurso+1}</b>
+ </p>
+
+ <p class="sub">
+ Nenhum resultado posterior ao concurso avaliado
+ foi usado para gerar seu ranking.
+ </p>
+ </div>
+
+ <div class="card">
+ <h2>RESULTADO GLOBAL — SELEÇÃO DINÂMICA</h2>
+
+ <table>
+ <tr>
+ <th>Grupo</th>
+ <th>V10</th>
+ <th>Baseline</th>
+ <th>Dif.</th>
+ <th>Lift</th>
+ </tr>
+ `;
+
+ for(const k of cortes){
+
+   const m=globalD.medias[k];
+   const base=6*k/60;
+   const dif=m-base;
+
+   html+=`
+   <tr>
+   <td>Top ${k}</td>
+   <td><b>${fmt(m)}</b></td>
+   <td>${fmt(base)}</td>
+   <td class="${classe(m,base)}">
+   ${dif>=0?"+":""}${fmt(dif)}
+   </td>
+   <td>${fmt(m/base)}×</td>
+   </tr>`;
+ }
+
+ html+=`
+ </table>
+ </div>
+
+ <div class="card">
+ <h2>M5 FIXO — RESULTADO GLOBAL</h2>
+
+ <p class="sub">
+ Esta tabela verifica se o M5, vencedor da V9,
+ mantém vantagem quando usado sozinho ao longo
+ de todo o período walk-forward.
+ </p>
+
+ <table>
+ <tr>
+ <th>Grupo</th>
+ <th>M5</th>
+ <th>Baseline</th>
+ <th>Dif.</th>
+ <th>Lift</th>
+ </tr>
+ `;
+
+ for(const k of cortes){
+
+   const m=globalM5.medias[k];
+   const base=6*k/60;
+   const dif=m-base;
+
+   html+=`
+   <tr>
+   <td>Top ${k}</td>
+   <td><b>${fmt(m)}</b></td>
+   <td>${fmt(base)}</td>
+   <td class="${classe(m,base)}">
+   ${dif>=0?"+":""}${fmt(dif)}
+   </td>
+   <td>${fmt(m/base)}×</td>
+   </tr>`;
+ }
+
+ html+=`
+ </table>
+ </div>
+
+ <div class="card">
+ <h2>ESTABILIDADE POR BLOCO — TOP 10</h2>
+
+ <table>
+ <tr>
+ <th>Bloco</th>
+ <th>Concursos</th>
+ <th>Dinâmico</th>
+ <th>M5</th>
+ <th>Baseline</th>
+ </tr>
+ `;
+
+ resultados.forEach((x,i)=>{
+
+   const primeiro=
+     hist[x.bloco.inicio].concurso;
+
+   const ultimo=
+     hist[x.bloco.fim-1].concurso;
+
+   html+=`
+   <tr>
+   <td>${i+1}</td>
+   <td>${primeiro}–${ultimo}</td>
+
+   <td class="${classe(x.dinamico.medias[10],1)}">
+   ${fmt(x.dinamico.medias[10])}
+   </td>
+
+   <td class="${classe(x.m5.medias[10],1)}">
+   ${fmt(x.m5.medias[10])}
+   </td>
+
+   <td>1.000</td>
+   </tr>`;
+ });
+
+ html+=`
+ </table>
+ </div>
+
+ <div class="card">
+ <h2>MODELOS ESCOLHIDOS POR BLOCO</h2>
+
+ <table>
+ <tr>
+ <th>Bloco</th>
+ <th>M0</th><th>M1</th><th>M2</th><th>M3</th>
+ <th>M4</th><th>M5</th><th>M6</th><th>M7</th>
+ </tr>
+ `;
+
+ resultados.forEach((x,i)=>{
+
+   html+=`<tr><td>${i+1}</td>`;
+
+   x.dinamico.modelos.forEach(n=>{
+     html+=`<td>${n}</td>`;
+   });
+
+   html+=`</tr>`;
+ });
+
+ html+=`
+ </table>
+ </div>
+
+ <div class="card">
+ <h2>MODELO CONGELADO PARA O PRÓXIMO CONCURSO</h2>
+
+ <p>
+ Modelo selecionado sem conhecer o resultado:
+ <span class="good"><b>M${modeloFinal}</b></span>
+ </p>
+
+ <table>
+ <tr>
+ <th>Modelo</th>
+ <th>Média interna Top 10</th>
+ <th>Testes</th>
+ </tr>
+ `;
+
+ escolhaFinal.forEach(x=>{
+
+   html+=`
+   <tr>
+   <td>M${x.modelo}</td>
+   <td>${fmt(x.media)}</td>
+   <td>${x.testes}</td>
+   </tr>`;
+ });
+
+ html+=`
+ </table>
+ </div>
+
+ <div class="card">
+ <h2>TOP 10 CONGELADO</h2>
+
+ <p class="sub">
+ Este ranking foi calculado somente com o histórico
+ fornecido. Não altere o modelo depois de revelar
+ o concurso externo.
+ </p>
+
+ <table>
+ <tr>
+ <th>#</th>
+ <th>Dezena</th>
+ <th>Passo</th>
+ <th>Hazard</th>
+ <th>Lift regime</th>
+ </tr>
+ `;
+
+ rankFinal.slice(0,10).forEach((x,i)=>{
+
+   html+=`
+   <tr>
+   <td>${i+1}</td>
+   <td><b>${String(x.d).padStart(2,"0")}</b></td>
+   <td>${x.passo}</td>
+   <td>${fmt(x.hazard*100,1)}%</td>
+   <td>${fmt(x.regime)}×</td>
+   </tr>`;
+ });
+
+ html+=`
+ </table>
+ </div>
+
+ <div class="card">
+ <h2>REGRA DE DECISÃO V10</h2>
+
+ <p class="sub">
+ A V10 não será considerada superior apenas porque
+ um bloco teve bom desempenho.
+
+ Precisamos observar se o Top 10 permanece próximo
+ ou acima de 1,000 em vários blocos independentes,
+ se o ganho global não depende de um único período
+ e se o M5 mantém comportamento semelhante fora
+ da janela em que foi originalmente favorecido.
+
+ O concurso externo permanece reservado para a
+ última verificação.
+ </p>
+ </div>
+ `;
+
+ document.getElementById("saida").innerHTML=html;
+
+ document.getElementById("saida")
+   .scrollIntoView({behavior:"smooth"});
+}
+
+</script>
+</body>
+</html>
