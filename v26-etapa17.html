@@ -1,0 +1,279 @@
+
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mega Passos V26 — Etapa 17</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#07111f;color:#f4f7fb;font-family:Arial,sans-serif}
+main{max-width:950px;margin:auto;padding:18px}
+h1{font-size:27px}
+h2{font-size:21px}
+p{line-height:1.55}
+.card{background:#152136;border-radius:17px;padding:20px;margin:18px 0}
+label{display:block;margin:15px 0 6px;color:#a9d8b2;font-weight:bold}
+input,textarea{width:100%;background:#0b1628;color:white;border:1px solid #60708b;border-radius:10px;padding:13px;font-size:16px}
+textarea{height:165px}
+button{width:100%;background:#9bd09c;color:#102619;border:0;border-radius:12px;padding:17px;font-size:17px;font-weight:bold;margin:10px 0;cursor:pointer}
+.secondary{background:#a7b9db;color:#102038}
+.error{color:#ff9999;white-space:pre-wrap}
+.ok{color:#a9d8b2;white-space:pre-wrap}
+.warn{color:#f5ce78}
+table{width:100%;border-collapse:collapse;margin-top:15px}
+th,td{padding:12px 7px;border-bottom:1px solid #40516a;text-align:center}
+th{color:#a9d8b2}
+.small{font-size:14px;color:#b3bfd0}
+pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#0b1628;padding:12px;border-radius:10px}
+</style>
+</head>
+<body>
+<main>
+<h1>Mega Passos V26 — Etapa 17</h1>
+<p class="small">Registro estruturado e conferência de rankings congelados.</p>
+
+<section class="card">
+<h2>1 — Registrar previsão</h2>
+<p>Copie da V25 os rankings completos de dez dezenas, mantendo a ordem apresentada.</p>
+
+<label>Concurso-alvo</label>
+<input id="alvo" type="number" value="3067" min="1">
+
+<label>Treinamento até o concurso</label>
+<input id="treino" type="number" value="3066" min="1">
+
+<label>Assinatura do histórico da V25</label>
+<input id="assinatura" value="0b86c559">
+
+<label>F25 — Top10</label>
+<textarea id="f25">48 53 04 11 36 38 43 02 06 10</textarea>
+
+<label>F50 — Top10</label>
+<textarea id="f50">11 16 48 06 43 58 21 24 30 02</textarea>
+
+<label>M5 — Top10</label>
+<textarea id="m5">11 58 16 06 42 48 43 23 53 35</textarea>
+
+<button onclick="gerar()">GERAR REGISTRO JSON</button>
+<div id="mensagemGerar"></div>
+</section>
+
+<section class="card">
+<h2>2 — Registro gerado</h2>
+<p class="warn">Copie e publique o JSON no GitHub antes do sorteio, caso queira documentar antecipadamente a previsão. A data de geração local não comprova publicação anterior.</p>
+<textarea id="saida" placeholder="O registro aparecerá aqui."></textarea>
+<button class="secondary" onclick="copiar()">COPIAR JSON</button>
+<div id="mensagemCopia"></div>
+</section>
+
+<section class="card">
+<h2>3 — Conferir previsão registrada</h2>
+<p>Cole o JSON completo salvo anteriormente. A conferência usa somente as dezenas contidas nele, sem recalcular rankings.</p>
+
+<label>Registro JSON</label>
+<textarea id="entrada" placeholder='Cole aqui o JSON completo, incluindo { e }'></textarea>
+
+<label>Seis dezenas sorteadas</label>
+<input id="resultado" placeholder="Exemplo: 01 04 17 33 41 52">
+
+<button onclick="conferir()">CONFERIR ACERTOS</button>
+<div id="mensagemConferir"></div>
+<div id="tabela"></div>
+</section>
+
+<section class="card">
+<h2>Regras da auditoria</h2>
+<p>O sistema verifica se o JSON está completo, se o concurso-alvo corresponde ao treinamento informado, se cada modelo contém dez dezenas válidas e distintas e se o resultado contém seis dezenas distintas.</p>
+<p class="warn">A conferência demonstra apenas os acertos das listas fornecidas. Não autentica a data de publicação, não prova que os rankings foram produzidos pela V25 e não demonstra vantagem preditiva.</p>
+</section>
+</main>
+
+<script>
+"use strict";
+
+function campo(id){
+  return document.getElementById(id);
+}
+
+function numeros(texto,quantidade){
+  const partes=String(texto).trim().split(/[\s,;|-]+/).filter(Boolean);
+  if(partes.length!==quantidade){
+    throw new Error("Esperadas "+quantidade+" dezenas; recebidas "+partes.length+".");
+  }
+  const nums=partes.map(x=>{
+    if(!/^\d{1,2}$/.test(x)) throw new Error("Dezena inválida: "+x);
+    return Number(x);
+  });
+  if(nums.some(n=>n<1||n>60)){
+    throw new Error("Todas as dezenas devem estar entre 01 e 60.");
+  }
+  if(new Set(nums).size!==nums.length){
+    throw new Error("Existem dezenas repetidas.");
+  }
+  return nums;
+}
+
+function formatar(nums){
+  return nums.map(n=>String(n).padStart(2,"0")).join(" ");
+}
+
+function validarRegistro(r){
+  if(!r||typeof r!=="object"||Array.isArray(r)){
+    throw new Error("O registro precisa ser um objeto JSON.");
+  }
+  if(r.versao!=="V26-E17"){
+    throw new Error("Versão do registro incompatível.");
+  }
+  if(!Number.isSafeInteger(r.concursoAlvo)||r.concursoAlvo<2){
+    throw new Error("Concurso-alvo inválido.");
+  }
+  if(!Number.isSafeInteger(r.treinamentoAte)||
+     r.treinamentoAte!==r.concursoAlvo-1){
+    throw new Error("O treinamento deve terminar no concurso imediatamente anterior.");
+  }
+  if(typeof r.assinaturaHistorico!=="string"||
+     !r.assinaturaHistorico.trim()){
+    throw new Error("Assinatura do histórico ausente.");
+  }
+  if(!r.rankings||typeof r.rankings!=="object"){
+    throw new Error("Rankings ausentes.");
+  }
+  for(const nome of ["F25","F50","M5"]){
+    if(!Array.isArray(r.rankings[nome])){
+      throw new Error("Ranking "+nome+" ausente.");
+    }
+    numeros(r.rankings[nome].join(" "),10);
+  }
+  if(typeof r.geradoEmUTC!=="string"||
+     !Number.isFinite(Date.parse(r.geradoEmUTC))){
+    throw new Error("Data de geração inválida.");
+  }
+  return r;
+}
+
+function gerar(){
+  const msg=campo("mensagemGerar");
+  msg.textContent="";
+  msg.className="error";
+  try{
+    const alvo=Number(campo("alvo").value);
+    const treino=Number(campo("treino").value);
+    const registro={
+      versao:"V26-E17",
+      concursoAlvo:alvo,
+      treinamentoAte:treino,
+      assinaturaHistorico:campo("assinatura").value.trim(),
+      geradoEmUTC:new Date().toISOString(),
+      rankings:{
+        F25:numeros(campo("f25").value,10),
+        F50:numeros(campo("f50").value,10),
+        M5:numeros(campo("m5").value,10)
+      }
+    };
+    validarRegistro(registro);
+    const json=JSON.stringify(registro,null,2);
+    campo("saida").value=json;
+    campo("entrada").value=json;
+    msg.textContent="Registro estruturado gerado. Copie e guarde o JSON completo.";
+    msg.className="ok";
+  }catch(e){
+    msg.textContent="ERRO: "+e.message;
+    campo("saida").value="";
+  }
+}
+
+async function copiar(){
+  const msg=campo("mensagemCopia");
+  const valor=campo("saida").value;
+  if(!valor){
+    msg.textContent="Gere o JSON primeiro.";
+    msg.className="error";
+    return;
+  }
+  try{
+    await navigator.clipboard.writeText(valor);
+    msg.textContent="JSON copiado.";
+    msg.className="ok";
+  }catch(e){
+    campo("saida").focus();
+    campo("saida").select();
+    msg.textContent="Selecione o texto acima e use Copiar no iPhone.";
+    msg.className="warn";
+  }
+}
+
+function conferir(){
+  const msg=campo("mensagemConferir");
+  const tabela=campo("tabela");
+  msg.textContent="";
+  tabela.replaceChildren();
+  msg.className="error";
+
+  try{
+    const texto=campo("entrada").value.trim();
+    if(!texto){
+      throw new Error("Cole o registro JSON completo no primeiro campo.");
+    }
+
+    let registro;
+    try{
+      registro=JSON.parse(texto);
+    }catch(e){
+      throw new Error("JSON incompleto ou inválido. Copie desde a chave inicial { até a chave final }.");
+    }
+
+    validarRegistro(registro);
+    const sorteio=numeros(campo("resultado").value,6);
+    const conjunto=new Set(sorteio);
+
+    const titulo=document.createElement("h3");
+    titulo.textContent="Resultado — Concurso "+registro.concursoAlvo;
+    tabela.appendChild(titulo);
+
+    const info=document.createElement("p");
+    info.textContent="Dezenas informadas: "+formatar(sorteio);
+    tabela.appendChild(info);
+
+    const tab=document.createElement("table");
+    const cab=document.createElement("tr");
+    for(const t of ["Modelo","Acertos","Dezenas acertadas"]){
+      const th=document.createElement("th");
+      th.textContent=t;
+      cab.appendChild(th);
+    }
+    tab.appendChild(cab);
+
+    for(const nome of ["F25","F50","M5"]){
+      const acertos=registro.rankings[nome].filter(n=>conjunto.has(n));
+      const tr=document.createElement("tr");
+      for(const valor of [
+        nome,
+        acertos.length+"/6",
+        acertos.length?formatar(acertos):"Nenhuma"
+      ]){
+        const td=document.createElement("td");
+        td.textContent=valor;
+        tr.appendChild(td);
+      }
+      tab.appendChild(tr);
+    }
+    tabela.appendChild(tab);
+
+    const nota=document.createElement("p");
+    nota.className="small";
+    nota.textContent=
+      "Registro gerado em: "+registro.geradoEmUTC+
+      " | Assinatura informada: "+registro.assinaturaHistorico+
+      ". A conferência não comprova publicação antecipada.";
+    tabela.appendChild(nota);
+
+    msg.textContent="JSON validado e conferência concluída.";
+    msg.className="ok";
+  }catch(e){
+    msg.textContent="ERRO: "+e.message;
+  }
+}
+</script>
+</body>
+</html>
