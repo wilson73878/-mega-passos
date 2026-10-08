@@ -1,0 +1,268 @@
+
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mega Passos V27 — Etapa 18</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#07111f;color:#f4f7fb;font-family:Arial,sans-serif}
+main{max-width:950px;margin:auto;padding:18px}
+h1{font-size:27px}
+h2{font-size:21px}
+p{line-height:1.55}
+.card{background:#152136;border-radius:17px;padding:20px;margin:18px 0}
+label{display:block;margin:15px 0 6px;color:#a9d8b2;font-weight:bold}
+input,textarea{width:100%;background:#0b1628;color:white;border:1px solid #60708b;border-radius:10px;padding:13px;font-size:16px}
+textarea{height:240px}
+button{width:100%;background:#9bd09c;color:#102619;border:0;border-radius:12px;padding:17px;font-size:17px;font-weight:bold;margin:10px 0;cursor:pointer}
+.secondary{background:#a7b9db;color:#102038}
+.error{color:#ff9999;white-space:pre-wrap}
+.ok{color:#a9d8b2;white-space:pre-wrap}
+.warn{color:#f5ce78}
+.small{font-size:14px;color:#b3bfd0}
+pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#0b1628;padding:12px;border-radius:10px}
+code{overflow-wrap:anywhere}
+</style>
+</head>
+<body>
+<main>
+<h1>Mega Passos V27 — Etapa 18</h1>
+<p class="small">Integridade, assinatura SHA-256 e arquivamento dos registros.</p>
+
+<section class="card">
+<h2>1 — Importar registro da V26</h2>
+<p>Cole abaixo o JSON completo gerado na V26.</p>
+
+<label>Registro JSON original</label>
+<textarea id="registro" placeholder="Cole aqui o JSON completo da V26"></textarea>
+
+<button onclick="analisar()">VALIDAR E CALCULAR SHA-256</button>
+<div id="mensagem"></div>
+</section>
+
+<section class="card">
+<h2>2 — Assinatura de integridade</h2>
+<p>Esta assinatura identifica o conteúdo exato do JSON, incluindo espaços e quebras de linha.</p>
+
+<label>SHA-256 calculado</label>
+<textarea id="hash" readonly style="height:100px"></textarea>
+
+<button class="secondary" onclick="copiar('hash')">COPIAR SHA-256</button>
+</section>
+
+<section class="card">
+<h2>3 — Comprovante para arquivamento</h2>
+<p>O comprovante contém o registro original, a assinatura calculada e a data da verificação.</p>
+
+<label>Comprovante completo</label>
+<textarea id="comprovante" readonly></textarea>
+
+<button class="secondary" onclick="copiar('comprovante')">COPIAR COMPROVANTE</button>
+
+<p class="warn">
+Publique o comprovante no GitHub para documentar o registro.
+O horário local e a assinatura SHA-256, isoladamente,
+não comprovam publicação anterior ao sorteio.
+</p>
+</section>
+
+<section class="card">
+<h2>4 — Verificar integridade posteriormente</h2>
+<p>Cole o JSON original arquivado e a assinatura SHA-256 anteriormente registrada.</p>
+
+<label>JSON a verificar</label>
+<textarea id="verificarJson"></textarea>
+
+<label>SHA-256 esperado</label>
+<input id="hashEsperado" placeholder="Cole a assinatura de 64 caracteres">
+
+<button onclick="verificar()">VERIFICAR INTEGRIDADE</button>
+<div id="resultadoVerificacao"></div>
+</section>
+
+<section class="card">
+<h2>Orientações da auditoria</h2>
+<p>Uma assinatura idêntica indica que o conteúdo verificado corresponde ao conteúdo associado à assinatura fornecida, considerando a segurança criptográfica do SHA-256.</p>
+<p>Uma assinatura diferente indica que os conteúdos não são exatamente iguais.</p>
+<p class="warn">
+Esta ferramenta não confirma a autenticidade da origem do JSON,
+não verifica automaticamente o histórico do GitHub
+e não comprova capacidade de previsão.
+</p>
+</section>
+</main>
+
+<script>
+"use strict";
+
+const campo=id=>document.getElementById(id);
+
+function validarNumeros(lista,quantidade,nome){
+  if(!Array.isArray(lista)||lista.length!==quantidade){
+    throw new Error(nome+" deve conter exatamente "+quantidade+" dezenas.");
+  }
+  if(lista.some(n=>!Number.isInteger(n)||n<1||n>60)){
+    throw new Error(nome+" contém dezenas inválidas.");
+  }
+  if(new Set(lista).size!==quantidade){
+    throw new Error(nome+" contém dezenas repetidas.");
+  }
+}
+
+function validarRegistro(texto){
+  if(!texto.trim()){
+    throw new Error("O JSON está vazio.");
+  }
+
+  let r;
+  try{
+    r=JSON.parse(texto);
+  }catch(e){
+    throw new Error("JSON inválido ou incompleto.");
+  }
+
+  if(!r||typeof r!=="object"||Array.isArray(r)){
+    throw new Error("Formato do registro inválido.");
+  }
+
+  if(r.versao!=="V26-E17"){
+    throw new Error("Versão incompatível. Esperado: V26-E17.");
+  }
+
+  if(!Number.isSafeInteger(r.concursoAlvo)||
+     !Number.isSafeInteger(r.treinamentoAte)||
+     r.concursoAlvo<2||
+     r.treinamentoAte!==r.concursoAlvo-1){
+    throw new Error("Concurso-alvo ou treinamento inválido.");
+  }
+
+  if(typeof r.assinaturaHistorico!=="string"||
+     !r.assinaturaHistorico.trim()){
+    throw new Error("Assinatura do histórico ausente.");
+  }
+
+  if(typeof r.geradoEmUTC!=="string"||
+     !Number.isFinite(Date.parse(r.geradoEmUTC))){
+    throw new Error("Data de geração inválida.");
+  }
+
+  if(!r.rankings||typeof r.rankings!=="object"){
+    throw new Error("Rankings ausentes.");
+  }
+
+  for(const nome of ["F25","F50","M5"]){
+    validarNumeros(r.rankings[nome],10,nome);
+  }
+
+  return r;
+}
+
+async function sha256(texto){
+  if(!window.crypto||!window.crypto.subtle){
+    throw new Error("SHA-256 indisponível neste navegador. Abra a página em HTTPS.");
+  }
+
+  const dados=new TextEncoder().encode(texto);
+  const digest=await crypto.subtle.digest("SHA-256",dados);
+
+  return Array.from(new Uint8Array(digest))
+    .map(b=>b.toString(16).padStart(2,"0"))
+    .join("");
+}
+
+async function analisar(){
+  const msg=campo("mensagem");
+  msg.textContent="";
+  msg.className="error";
+
+  campo("hash").value="";
+  campo("comprovante").value="";
+
+  try{
+    const texto=campo("registro").value;
+    const r=validarRegistro(texto);
+    const assinatura=await sha256(texto);
+
+    const comprovante={
+      tipo:"MEGA-PASSOS-INTEGRIDADE",
+      versao:"V27-E18",
+      concursoAlvo:r.concursoAlvo,
+      treinamentoAte:r.treinamentoAte,
+      assinaturaHistorico:r.assinaturaHistorico,
+      hashAlgoritmo:"SHA-256",
+      sha256:assinatura,
+      verificadoEmUTC:new Date().toISOString(),
+      registroOriginal:texto
+    };
+
+    campo("hash").value=assinatura;
+    campo("comprovante").value=JSON.stringify(comprovante,null,2);
+
+    campo("verificarJson").value=texto;
+    campo("hashEsperado").value=assinatura;
+
+    msg.textContent=
+      "JSON validado. Assinatura SHA-256 calculada com sucesso. "+
+      "Concurso: "+r.concursoAlvo+".";
+    msg.className="ok";
+
+  }catch(e){
+    msg.textContent="ERRO: "+e.message;
+  }
+}
+
+async function verificar(){
+  const msg=campo("resultadoVerificacao");
+  msg.textContent="";
+  msg.className="error";
+
+  try{
+    const texto=campo("verificarJson").value;
+    validarRegistro(texto);
+
+    const esperado=campo("hashEsperado").value.trim().toLowerCase();
+
+    if(!/^[0-9a-f]{64}$/.test(esperado)){
+      throw new Error("A assinatura esperada deve ter 64 caracteres hexadecimais.");
+    }
+
+    const calculado=await sha256(texto);
+
+    if(calculado===esperado){
+      msg.textContent=
+        "INTEGRIDADE CONFIRMADA: o JSON corresponde à assinatura informada.";
+      msg.className="ok";
+    }else{
+      msg.textContent=
+        "INTEGRIDADE NÃO CONFIRMADA: o JSON não corresponde à assinatura informada.";
+      msg.className="error";
+    }
+
+  }catch(e){
+    msg.textContent="ERRO: "+e.message;
+  }
+}
+
+async function copiar(id){
+  const elemento=campo(id);
+  const texto=elemento.value;
+
+  if(!texto){
+    alert("Não há conteúdo para copiar.");
+    return;
+  }
+
+  try{
+    await navigator.clipboard.writeText(texto);
+    alert("Conteúdo copiado.");
+  }catch(e){
+    elemento.focus();
+    elemento.select();
+    alert("Selecione o conteúdo e use Copiar no iPhone.");
+  }
+}
+</script>
+</body>
+</html>
