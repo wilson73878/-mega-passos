@@ -1,0 +1,675 @@
+
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Mega Passos V25 — Etapa 16</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#07111f;color:#f4f7fb;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif}
+main{max-width:1050px;margin:auto;padding:22px 15px 75px}
+h1{font-size:29px;margin:0 0 10px}
+h2{font-size:22px;margin:0 0 12px}
+h3{font-size:18px}
+p{line-height:1.55}
+.sub{color:#b2c1d5}
+.card{background:#152136;border-radius:19px;padding:20px;margin:18px 0;overflow-x:auto}
+textarea,input{width:100%;padding:13px;border:1px solid #61718a;border-radius:12px;background:#091629;color:white;font-size:14px}
+textarea{height:230px}
+input{margin:8px 0}
+button{width:100%;border:0;border-radius:12px;background:#86d292;color:#082b19;font-size:17px;font-weight:800;padding:16px;margin-top:12px}
+button.secondary{background:#9bb8ee;color:#10233f}
+button:disabled{opacity:.5}
+table{border-collapse:collapse;width:100%;min-width:580px}
+td,th{border-bottom:1px solid #384860;padding:10px 8px;text-align:center;white-space:nowrap}
+th{color:#a5e0ad}
+.ok{color:#86d292;font-weight:bold}
+.warn{color:#ffd477;font-weight:bold}
+.bad{color:#ff9999;font-weight:bold}
+.nums{font-size:17px;font-weight:800;line-height:1.9;word-spacing:6px}
+small{color:#b2c1d5}
+</style>
+</head>
+<body>
+<main>
+
+<h1>MEGA PASSOS V25 — ETAPA 16</h1>
+<p class="sub">
+Validação prospectiva dos modelos F25, F50 e M5 original.
+Pesos congelados. Nenhuma otimização.
+</p>
+
+<section class="card">
+<h2>1 — Histórico anterior ao sorteio</h2>
+<p class="sub">
+Para gerar a previsão do concurso 3067, cole exclusivamente
+os concursos de 1 a 3066. Para concursos futuros, utilize
+somente resultados já conhecidos antes do sorteio-alvo.
+</p>
+<textarea id="historico" placeholder="1 04 05 30 33 41 52
+2 09 37 39 41 43 49
+...
+3066 04 06 09 13 28 48"></textarea>
+
+<button onclick="gerar()">GERAR PREVISÃO PROSPECTIVA</button>
+<p id="statusGeracao" class="sub">Aguardando histórico.</p>
+</section>
+
+<section id="previsao" class="card" style="display:none">
+<h2>2 — Previsão gerada</h2>
+<div id="resumoPrevisao"></div>
+<div id="tabelaPrevisao"></div>
+
+<p class="warn">
+IMPORTANTE: copie e publique o registro JSON antes
+do sorteio. A geração local, sozinha, não comprova
+que a previsão foi registrada antecipadamente.
+</p>
+
+<textarea id="registroGerado" readonly></textarea>
+<button class="secondary" onclick="copiarRegistro()">
+COPIAR REGISTRO JSON
+</button>
+<p id="statusCopia" class="sub"></p>
+</section>
+
+<section class="card">
+<h2>3 — Conferir previsão já registrada</h2>
+<p class="sub">
+Após o sorteio, cole aqui o JSON que você salvou
+antes do resultado. A conferência utilizará exclusivamente
+as dezenas registradas, sem recalcular os rankings.
+</p>
+
+<textarea id="registroConferencia"
+placeholder="Cole aqui o registro JSON congelado antes do sorteio."></textarea>
+
+<p class="sub">Informe as seis dezenas sorteadas:</p>
+<input id="resultado"
+placeholder="Exemplo: 01 04 17 33 41 52">
+
+<button onclick="conferir()">CONFERIR ACERTOS</button>
+<div id="conferencia"></div>
+</section>
+
+<section class="card">
+<h2>4 — Regras da validação</h2>
+<p class="sub">
+F25: frequência das dezenas nos últimos 25 concursos.
+F50: frequência nos últimos 50 concursos.
+M5: fórmula original da V18, incluindo Hazard,
+Regime aprendido desde o concurso histórico 31,
+F25, F50 e F100.
+</p>
+<p>
+<b>M5 = 35% Hazard + 25% Regime + 15% F25 +
+15% F50 + 10% F100.</b>
+</p>
+<p class="sub">
+O ranking utiliza as 10 dezenas mais pontuadas.
+Empates são resolvidos pela dezena menor.
+O concurso-alvo nunca entra no treinamento.
+O aplicativo não salva registros automaticamente
+no servidor nem comprova a data de publicação.
+</p>
+</section>
+
+</main>
+
+<script>
+"use strict";
+
+/* ===================================
+   FUNÇÕES AUXILIARES
+=================================== */
+
+function el(id){
+ return document.getElementById(id);
+}
+
+function fmt(x,n=3){
+ return Number(x).toFixed(n);
+}
+
+function dezena(d){
+ return String(d).padStart(2,"0");
+}
+
+function lista(arr){
+ return arr.map(dezena).join(" ");
+}
+
+function faixa(p){
+ if(p<=3)return 0;
+ if(p<=6)return 1;
+ if(p<=10)return 2;
+ if(p<=15)return 3;
+ return 4;
+}
+
+/* ===================================
+   VALIDAÇÃO DO HISTÓRICO
+=================================== */
+
+function parseDados(txt){
+
+ const linhas=txt.trim().split(/\n+/);
+ const hist=[];
+
+ if(!txt.trim()){
+  throw Error("Cole o histórico antes de gerar.");
+ }
+
+ for(const linha of linhas){
+
+  const v=linha.trim().split(/\s+/).map(Number);
+
+  if(v.length!==7){
+   throw Error("Linha inválida: "+linha.slice(0,60));
+  }
+
+  const concurso=v[0];
+  const dezenas=v.slice(1);
+
+  if(
+   !Number.isInteger(concurso) ||
+   dezenas.some(d=>
+    !Number.isInteger(d) || d<1 || d>60
+   ) ||
+   new Set(dezenas).size!==6
+  ){
+   throw Error("Dados inválidos: "+linha.slice(0,60));
+  }
+
+  hist.push({concurso,dezenas});
+ }
+
+ hist.sort((a,b)=>a.concurso-b.concurso);
+
+ if(hist.length<100){
+  throw Error("São necessários pelo menos 100 concursos.");
+ }
+
+ for(let i=0;i<hist.length;i++){
+  if(hist[i].concurso!==i+1){
+   throw Error(
+    "Histórico deve começar em 1 e ser contínuo. "+
+    "Verifique o concurso "+(i+1)
+   );
+  }
+ }
+
+ return hist;
+}
+
+/* ===================================
+   M5 ORIGINAL DA V18
+=================================== */
+
+function passoAtual(hist,d){
+
+ for(let i=hist.length-1;i>=0;i--){
+  if(hist[i].dezenas.includes(d)){
+   return hist.length-i;
+  }
+ }
+
+ return hist.length+1;
+}
+
+function freq(hist,d,n){
+
+ const h=n>=hist.length?hist:hist.slice(-n);
+
+ if(!h.length)return 0;
+
+ let c=0;
+
+ for(const x of h){
+  if(x.dezenas.includes(d))c++;
+ }
+
+ return c/h.length;
+}
+
+function gaps(hist,d){
+
+ const pos=[];
+
+ hist.forEach((x,i)=>{
+  if(x.dezenas.includes(d))pos.push(i);
+ });
+
+ const g=[];
+
+ for(let i=1;i<pos.length;i++){
+  g.push(pos[i]-pos[i-1]);
+ }
+
+ return g;
+}
+
+function hazard(hist,d){
+
+ const p=passoAtual(hist,d);
+ const gs=gaps(hist,d);
+
+ if(!gs.length)return .10;
+
+ let chegou=0;
+ let saiu=0;
+
+ for(const g of gs){
+  if(g>=p)chegou++;
+  if(g===p)saiu++;
+ }
+
+ return (saiu+1)/(chegou+10);
+}
+
+/*
+ Regime matematicamente equivalente
+ ao aprenderRegimes da V18.
+
+ Cada observação usa apenas o histórico
+ anterior ao concurso observado.
+*/
+
+function aprenderRegimes(hist){
+
+ const n=[0,0,0,0,0];
+ const ac=[0,0,0,0,0];
+
+ const ultima=new Int32Array(61);
+ ultima.fill(-1);
+
+ for(let t=0;t<hist.length;t++){
+
+  if(t>=30){
+
+   const real=new Set(hist[t].dezenas);
+
+   for(let d=1;d<=60;d++){
+
+    const p=ultima[d]<0
+     ?t+1
+     :t-ultima[d];
+
+    const f=faixa(p);
+
+    n[f]++;
+
+    if(real.has(d))ac[f]++;
+   }
+  }
+
+  for(const d of hist[t].dezenas){
+   ultima[d]=t;
+  }
+ }
+
+ return n.map((x,i)=>{
+
+  const taxa=(ac[i]+2)/(x+20);
+
+  return {
+   n:x,
+   ac:ac[i],
+   taxa,
+   lift:taxa/.10
+  };
+ });
+}
+
+function scoreM5(hist,d,regimes){
+
+ const p=passoAtual(hist,d);
+ const hz=hazard(hist,d);
+
+ return (
+  hz*.35 +
+  regimes[faixa(p)].lift*.25 +
+  freq(hist,d,25)*.15 +
+  freq(hist,d,50)*.15 +
+  freq(hist,d,100)*.10
+ );
+}
+
+/* ===================================
+   RANKINGS CONGELADOS
+=================================== */
+
+function ranking(hist,modelo,regimes){
+
+ const arr=[];
+
+ for(let d=1;d<=60;d++){
+
+  let score=0;
+
+  if(modelo==="F25"){
+   score=freq(hist,d,25);
+  }
+
+  if(modelo==="F50"){
+   score=freq(hist,d,50);
+  }
+
+  if(modelo==="M5"){
+   score=scoreM5(hist,d,regimes);
+  }
+
+  arr.push({d,score});
+ }
+
+ arr.sort((a,b)=>
+  b.score-a.score || a.d-b.d
+ );
+
+ return arr;
+}
+
+/* ===================================
+   IDENTIFICAÇÃO DO HISTÓRICO
+=================================== */
+
+/*
+ Impressão digital simples para controle
+ de integridade, não criptográfica.
+*/
+
+function assinatura(hist){
+
+ let h=2166136261>>>0;
+
+ for(const c of hist){
+
+  const valores=[
+   c.concurso,
+   ...c.dezenas.slice().sort((a,b)=>a-b)
+  ];
+
+  for(const v of valores){
+   h^=v;
+   h=Math.imul(h,16777619)>>>0;
+  }
+ }
+
+ return h.toString(16).padStart(8,"0");
+}
+
+/* ===================================
+   GERAÇÃO PROSPECTIVA
+=================================== */
+
+let ultimoRegistro=null;
+
+function gerar(){
+
+ el("previsao").style.display="none";
+ el("statusGeracao").textContent="Calculando...";
+
+ try{
+
+  const hist=parseDados(el("historico").value);
+
+  const ultimo=hist[hist.length-1].concurso;
+  const alvo=ultimo+1;
+
+  const regimes=aprenderRegimes(hist);
+
+  const f25=ranking(hist,"F25",regimes);
+  const f50=ranking(hist,"F50",regimes);
+  const m5=ranking(hist,"M5",regimes);
+
+  const modelos={
+   F25:f25.slice(0,10).map(x=>x.d),
+   F50:f50.slice(0,10).map(x=>x.d),
+   M5:m5.slice(0,10).map(x=>x.d)
+  };
+
+  const registro={
+   projeto:"MEGA PASSOS",
+   versao:"V25",
+   etapa:16,
+   modalidade:"prospectiva",
+   concursoAlvo:alvo,
+   ultimoConcursoTreinamento:ultimo,
+   quantidadeHistorica:hist.length,
+   assinaturaHistorico:assinatura(hist),
+   geradoEm:new Date().toISOString(),
+   metodologia:{
+    F25:"Frequencia ultimos 25 concursos",
+    F50:"Frequencia ultimos 50 concursos",
+    M5:"Formula original V18, pesos congelados"
+   },
+   modelos
+  };
+
+  ultimoRegistro=registro;
+
+  el("resumoPrevisao").innerHTML=`
+   <p>Concurso-alvo:
+   <b>${alvo}</b></p>
+   <p>Treinamento até:
+   <b>${ultimo}</b></p>
+   <p>Concursos utilizados:
+   <b>${hist.length}</b></p>
+   <p>Assinatura do histórico:
+   <b>${registro.assinaturaHistorico}</b></p>
+  `;
+
+  let html=`
+   <table>
+   <tr>
+    <th>Modelo</th>
+    <th>Top10 congelado</th>
+   </tr>
+  `;
+
+  for(const nome of ["F25","F50","M5"]){
+
+   html+=`
+    <tr>
+     <td><b>${nome}</b></td>
+     <td class="nums">
+      ${lista(modelos[nome])}
+     </td>
+    </tr>
+   `;
+  }
+
+  html+="</table>";
+
+  el("tabelaPrevisao").innerHTML=html;
+
+  el("registroGerado").value=
+   JSON.stringify(registro,null,2);
+
+  el("previsao").style.display="block";
+
+  el("statusGeracao").textContent=
+   "Previsão calculada. Copie e publique o JSON antes do sorteio.";
+
+  el("previsao").scrollIntoView({
+   behavior:"smooth"
+  });
+
+ }catch(e){
+
+  el("statusGeracao").textContent=
+   "ERRO: "+e.message;
+
+  alert(e.message);
+ }
+}
+
+/* ===================================
+   COPIAR REGISTRO
+=================================== */
+
+async function copiarRegistro(){
+
+ const texto=el("registroGerado").value;
+
+ if(!texto)return;
+
+ try{
+
+  await navigator.clipboard.writeText(texto);
+
+  el("statusCopia").textContent=
+   "Registro copiado. Publique antes do sorteio.";
+
+ }catch(e){
+
+  el("registroGerado").focus();
+  el("registroGerado").select();
+
+  el("statusCopia").textContent=
+   "Selecione Copiar no menu do iPhone.";
+ }
+}
+
+/* ===================================
+   CONFERÊNCIA SEM RECÁLCULO
+=================================== */
+
+function parseResultado(txt){
+
+ const nums=txt.trim().split(/[\s,;/-]+/)
+  .filter(Boolean).map(Number);
+
+ if(
+  nums.length!==6 ||
+  nums.some(x=>
+   !Number.isInteger(x)||x<1||x>60
+  ) ||
+  new Set(nums).size!==6
+ ){
+  throw Error(
+   "Informe exatamente seis dezenas válidas."
+  );
+ }
+
+ return nums;
+}
+
+function validarRegistro(r){
+
+ if(
+  !r ||
+  r.projeto!=="MEGA PASSOS" ||
+  r.versao!=="V25" ||
+  !Number.isInteger(r.concursoAlvo) ||
+  !r.modelos
+ ){
+  throw Error("Registro V25 inválido.");
+ }
+
+ for(const nome of ["F25","F50","M5"]){
+
+  const a=r.modelos[nome];
+
+  if(
+   !Array.isArray(a) ||
+   a.length!==10 ||
+   a.some(x=>
+    !Number.isInteger(x)||x<1||x>60
+   ) ||
+   new Set(a).size!==10
+  ){
+   throw Error(
+    "Top10 inválido no modelo "+nome
+   );
+  }
+ }
+}
+
+function conferir(){
+
+ el("conferencia").innerHTML="";
+
+ try{
+
+  const registro=JSON.parse(
+   el("registroConferencia").value
+  );
+
+  validarRegistro(registro);
+
+  const real=parseResultado(
+   el("resultado").value
+  );
+
+  const conjunto=new Set(real);
+
+  let html=`
+   <h3>Resultado da conferência</h3>
+   <p>Concurso:
+   <b>${registro.concursoAlvo}</b></p>
+   <p>Resultado informado:
+   <b>${lista(real.slice().sort((a,b)=>a-b))}</b></p>
+
+   <table>
+    <tr>
+     <th>Modelo</th>
+     <th>Acertos Top10</th>
+     <th>Dezenas acertadas</th>
+    </tr>
+  `;
+
+  for(const nome of ["F25","F50","M5"]){
+
+   const top=registro.modelos[nome];
+
+   const acertadas=top.filter(
+    d=>conjunto.has(d)
+   ).sort((a,b)=>a-b);
+
+   html+=`
+    <tr>
+     <td>${nome}</td>
+     <td><b>${acertadas.length}/6</b></td>
+     <td>
+      ${acertadas.length
+       ?lista(acertadas)
+       :"Nenhuma"}
+     </td>
+    </tr>
+   `;
+  }
+
+  html+="</table>";
+
+  html+=`
+   <p class="sub">
+   Registro gerado em:
+   ${registro.geradoEm||"Não informado"}
+   </p>
+   <p class="sub">
+   Histórico:
+   ${registro.assinaturaHistorico||"Não informado"}
+   </p>
+   <p class="warn">
+   A conferência não comprova que o JSON
+   foi publicado antes do sorteio.
+   Essa verificação deve ser feita pelo
+   registro externo com data verificável.
+   </p>
+  `;
+
+  el("conferencia").innerHTML=html;
+
+ }catch(e){
+
+  el("conferencia").innerHTML=
+   '<p class="bad">ERRO: '+
+   String(e.message).replace(/</g,"&lt;")+
+   '</p>';
+ }
+}
+</script>
+</body>
+</html>
