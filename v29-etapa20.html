@@ -1,0 +1,528 @@
+
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mega Passos V29 — Etapa 20</title>
+<style>
+:root{color-scheme:dark;font-family:system-ui,-apple-system,Arial,sans-serif;background:#08101f;color:#eef3ff}
+*{box-sizing:border-box}
+body{margin:0;padding:18px;max-width:1100px;margin-inline:auto}
+h1{font-size:1.8rem;margin-bottom:5px}
+h2{font-size:1.25rem}
+p{line-height:1.5}
+.sub{color:#b3c4df}
+.panel{background:#19243a;border-radius:18px;padding:20px;margin:17px 0}
+textarea,input,select{background:#0c1628;color:#f3f7ff;border:1px solid #6e819d;border-radius:10px;padding:12px;font:inherit;max-width:100%}
+textarea{width:100%;height:215px;font-family:ui-monospace,monospace;font-size:13px}
+input[type=number]{width:100%}
+button{background:#a8d3a5;color:#112319;border:0;border-radius:11px;padding:13px 16px;font-size:1rem;font-weight:750;cursor:pointer;margin:7px 5px 7px 0}
+button.secondary{background:#b5c4e2;color:#18243b}
+button:disabled{opacity:.4}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px}
+.field label{display:block;margin-bottom:6px;color:#b8d7bd;font-weight:700}
+.stat{background:#0d172b;padding:12px;border-radius:12px}
+.stat strong{display:block;font-size:1.35rem}
+.ok{color:#b0e1ac}
+.error{color:#ff9f9f}
+.warn{color:#ffd782}
+.tablewrap{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:14px}
+th,td{border-bottom:1px solid #41506b;padding:9px 7px;text-align:right;white-space:nowrap}
+th:first-child,td:first-child{text-align:left}
+th{color:#b3d6b0}
+code,pre{white-space:pre-wrap;overflow-wrap:anywhere}
+.jogo{background:#0c1729;border-radius:10px;padding:12px;margin:8px 0;font-family:ui-monospace,monospace;line-height:1.6}
+.muted{color:#aab9d0}
+small{line-height:1.5}
+footer{margin:25px 0;color:#aab9d0}
+</style>
+</head>
+<body>
+
+<h1>Mega Passos <span class="ok">V29 — Etapa 20</span></h1>
+<p class="sub">Histórico auditado • Passos das 60 dezenas • Ranking exploratório • Gerador de 6 a 20 dezenas • Registro exportável</p>
+
+<section class="panel">
+<h2>1. Histórico oficial</h2>
+<p>Insira todos os concursos em sequência, um por linha, no formato <code>3068 07 10 39 40 43 57</code>. Para o concurso 3069, o histórico deve terminar em 3068.</p>
+<textarea id="historico" spellcheck="false" placeholder="1 04 05 30 33 41 52&#10;2 ...&#10;3068 07 10 39 40 43 57"></textarea>
+<button id="analisar">VALIDAR HISTÓRICO E ANALISAR</button>
+<button class="secondary" id="limpar">LIMPAR</button>
+<p id="status" aria-live="polite"></p>
+<div class="grid" id="resumo"></div>
+</section>
+
+<section class="panel">
+<h2>2. Análise de passos e ranking das 60 dezenas</h2>
+<p class="muted">Passo = quantidade de concursos desde a última ocorrência; zero indica que a dezena saiu no último sorteio. Os intervalos anteriores entre aparições também são calculados.</p>
+<div class="grid">
+<div class="field">
+<label for="pesoPasso">Peso do passo (0–100%)</label>
+<input id="pesoPasso" type="number" min="0" max="100" value="35">
+</div>
+<div class="field">
+<label for="peso25">Peso frequência 25 (%)</label>
+<input id="peso25" type="number" min="0" max="100" value="25">
+</div>
+<div class="field">
+<label for="peso50">Peso frequência 50 (%)</label>
+<input id="peso50" type="number" min="0" max="100" value="25">
+</div>
+<div class="field">
+<label for="peso100">Peso frequência 100 (%)</label>
+<input id="peso100" type="number" min="0" max="100" value="15">
+</div>
+</div>
+<button id="recalcular" class="secondary">RECALCULAR RANKING</button>
+<p class="warn">Este score é uma heurística configurável, não o modelo histórico M5 validado. Não confundir com previsão comprovada.</p>
+<div class="tablewrap">
+<table>
+<thead>
+<tr>
+<th>Pos.</th><th>Dezena</th><th>Passo</th><th>Passo médio</th><th>Máx.</th><th>F25</th><th>F50</th><th>F100</th><th>Hist.</th><th>Score</th>
+</tr>
+</thead>
+<tbody id="tabela"></tbody>
+</table>
+</div>
+</section>
+
+<section class="panel">
+<h2>3. Gerador de jogos (6 a 20 dezenas)</h2>
+<div class="grid">
+<div class="field">
+<label for="tamanho">Dezenas por jogo</label>
+<select id="tamanho"></select>
+</div>
+<div class="field">
+<label for="quantidade">Quantidade de jogos (1–100)</label>
+<input type="number" id="quantidade" min="1" max="100" value="5">
+</div>
+<div class="field">
+<label for="universo">Universo: primeiras N do ranking (20–60)</label>
+<input type="number" id="universo" min="20" max="60" value="40">
+</div>
+<div class="field">
+<label for="modo">Método de seleção</label>
+<select id="modo">
+<option value="ponderado">Sorteio ponderado pelo score</option>
+<option value="rodizio">Rodízio por ranking</option>
+</select>
+</div>
+</div>
+<button id="gerar">GERAR E AUDITAR JOGOS</button>
+<button id="copiarJogos" class="secondary">COPIAR JOGOS</button>
+<p id="statusJogos" aria-live="polite"></p>
+<div id="jogos"></div>
+</section>
+
+<section class="panel">
+<h2>4. Registro e exportação</h2>
+<p>O arquivo exportado guarda concurso-alvo, último resultado, parâmetros, ranking completo e jogos gerados. Publique no GitHub <strong>antes</strong> do sorteio para registrar uma previsão prospectiva.</p>
+<button id="baixar">BAIXAR REGISTRO JSON</button>
+<button id="copiarRegistro" class="secondary">COPIAR JSON</button>
+<p id="statusRegistro" aria-live="polite"></p>
+<textarea id="registro" readonly placeholder="O registro aparecerá após a análise."></textarea>
+</section>
+
+<footer>
+<small>V29-E20 • Análise exploratória. Sorteios independentes não tornam números atrasados mais prováveis. Confira as regras e valores oficiais da CAIXA antes de apostar. Jogos de 7 a 20 dezenas têm custos diferentes de uma aposta simples.</small>
+</footer>
+
+<script>
+'use strict';
+
+const $=id=>document.getElementById(id);
+const pad=n=>String(n).padStart(2,'0');
+
+let HIST=[],RANK=[],JOGOS=[],ALVO=null,DATA_GERACAO='';
+
+for(let n=6;n<=20;n++){
+ const o=document.createElement('option');
+ o.value=n;
+ o.textContent=n+' dezenas';
+ $('tamanho').appendChild(o);
+}
+
+function mensagem(id,txt,erro=false){
+ const el=$(id);
+ el.textContent=txt;
+ el.className=erro?'error':'ok';
+}
+
+function validar(txt){
+ const linhas=txt.trim().split(/\r?\n/)
+  .map(s=>s.trim()).filter(Boolean);
+
+ if(linhas.length<100)
+  throw Error('Informe pelo menos 100 concursos completos. Recebidos: '+linhas.length+'.');
+
+ const out=[];
+ let esperado=1;
+
+ for(const [i,l] of linhas.entries()){
+  const campos=l.split(/[\s;,]+/).filter(Boolean);
+
+  if(campos.length!==7)
+   throw Error('Linha '+(i+1)+': esperado número do concurso + seis dezenas.');
+
+  const a=campos.map(Number);
+
+  if(a.some((x,j)=>!Number.isInteger(x)||(j===0?x<1:x<1||x>60)))
+   throw Error('Linha '+(i+1)+': número inválido.');
+
+  if(a[0]!==esperado)
+   throw Error('Linha '+(i+1)+': concurso esperado '+esperado+', recebido '+a[0]+'.');
+
+  if(new Set(a.slice(1)).size!==6)
+   throw Error('Concurso '+a[0]+': dezenas repetidas.');
+
+  out.push({
+   concurso:a[0],
+   dezenas:a.slice(1).sort((x,y)=>x-y)
+  });
+
+  esperado++;
+ }
+ return out;
+}
+
+function parametros(){
+ const p=['pesoPasso','peso25','peso50','peso100']
+  .map(id=>Number($(id).value));
+
+ if(p.some(x=>!Number.isFinite(x)||x<0||x>100)
+    ||p.reduce((a,b)=>a+b,0)<=0)
+  throw Error('Pesos devem estar entre 0 e 100, com soma positiva.');
+
+ return p;
+}
+
+function calcular(){
+ if(!HIST.length)
+  throw Error('Valide o histórico primeiro.');
+
+ const p=parametros();
+ const tot=p.reduce((a,b)=>a+b,0);
+ const N=HIST.length;
+
+ const ultimo=Array(61).fill(-1);
+ const oc=Array.from({length:61},()=>[]);
+
+ for(let i=0;i<N;i++){
+  for(const n of HIST[i].dezenas){
+   ultimo[n]=i;
+   oc[n].push(i);
+  }
+ }
+
+ const f=(n,k)=>HIST.slice(-Math.min(k,N))
+  .reduce((s,c)=>s+Number(c.dezenas.includes(n)),0);
+
+ const dados=[];
+
+ for(let n=1;n<=60;n++){
+  const passo=ultimo[n]===-1?N:N-1-ultimo[n];
+  const pos=oc[n];
+  const gaps=[];
+
+  for(let i=1;i<pos.length;i++)
+   gaps.push(pos[i]-pos[i-1]);
+
+  const medio=gaps.length
+   ?gaps.reduce((a,b)=>a+b,0)/gaps.length:null;
+
+  const maximo=gaps.length?Math.max(...gaps):null;
+
+  const f25=f(n,25);
+  const f50=f(n,50);
+  const f100=f(n,100);
+  const freq=pos.length;
+
+  const sPasso=Math.min(passo,30)/30;
+
+  const score=(
+   p[0]*sPasso+
+   p[1]*f25/25*10+
+   p[2]*f50/50*10+
+   p[3]*f100/100*10
+  )/tot;
+
+  dados.push({
+   n,passo,medio,maximo,f25,f50,f100,freq,score
+  });
+ }
+
+ RANK=dados.sort((a,b)=>b.score-a.score||a.n-b.n);
+
+ $('tabela').innerHTML=RANK.map((x,i)=>
+  '<tr><td>'+(i+1)+'</td>'+
+  '<td><strong>'+pad(x.n)+'</strong></td>'+
+  '<td>'+x.passo+'</td>'+
+  '<td>'+(x.medio===null?'—':x.medio.toFixed(2))+'</td>'+
+  '<td>'+(x.maximo??'—')+'</td>'+
+  '<td>'+x.f25+'</td>'+
+  '<td>'+x.f50+'</td>'+
+  '<td>'+x.f100+'</td>'+
+  '<td>'+x.freq+'</td>'+
+  '<td>'+x.score.toFixed(4)+'</td></tr>'
+ ).join('');
+
+ JOGOS=[];
+ $('jogos').innerHTML='';
+ $('statusJogos').textContent='';
+ registro();
+}
+
+function registro(){
+ if(!HIST.length||!RANK.length)return;
+
+ const obj={
+  aplicativo:'MEGA-PASSOS',
+  versao:'V29-E20',
+  concursoAlvo:ALVO,
+  treinamentoAte:HIST.length,
+  geradoEmUTC:DATA_GERACAO,
+  ultimoResultado:HIST.at(-1).dezenas,
+  metodo:'heuristica exploratoria de passo e frequencias; sem validacao de vantagem preditiva',
+  parametros:{
+   pesoPasso:+$('pesoPasso').value,
+   peso25:+$('peso25').value,
+   peso50:+$('peso50').value,
+   peso100:+$('peso100').value
+  },
+  ranking60:RANK.map((x,i)=>({
+   posicao:i+1,
+   dezena:x.n,
+   passo:x.passo,
+   passoMedio:x.medio,
+   passoMaximo:x.maximo,
+   f25:x.f25,
+   f50:x.f50,
+   f100:x.f100,
+   frequenciaHistorica:x.freq,
+   score:+x.score.toFixed(8)
+  })),
+  jogos:JOGOS.map((nums,i)=>({
+   jogo:i+1,
+   dezenas:nums
+  }))
+ };
+
+ $('registro').value=JSON.stringify(obj,null,2);
+}
+
+$('analisar').onclick=()=>{
+ try{
+  HIST=validar($('historico').value);
+  ALVO=HIST.length+1;
+  DATA_GERACAO=new Date().toISOString();
+
+  calcular();
+
+  $('resumo').innerHTML=
+   '<div class="stat">Concursos<strong>'+HIST.length+'</strong></div>'+
+   '<div class="stat">Último concurso<strong>'+HIST.length+'</strong></div>'+
+   '<div class="stat">Próximo alvo<strong>'+ALVO+'</strong></div>'+
+   '<div class="stat">Último resultado<strong>'+
+   HIST.at(-1).dezenas.map(pad).join(' ')+
+   '</strong></div>';
+
+  mensagem('status',
+   'Histórico validado: concursos 1 a '+HIST.length+
+   '. Ranking das 60 dezenas calculado.');
+
+ }catch(e){
+  HIST=[];
+  RANK=[];
+  JOGOS=[];
+  $('resumo').innerHTML='';
+  $('tabela').innerHTML='';
+  $('registro').value='';
+  mensagem('status','ERRO: '+e.message,true);
+ }
+};
+
+$('recalcular').onclick=()=>{
+ try{
+  calcular();
+  mensagem('status',
+   'Ranking recalculado. Jogos anteriores descartados; gere novos jogos.');
+ }catch(e){
+  mensagem('status','ERRO: '+e.message,true);
+ }
+};
+
+$('limpar').onclick=()=>{
+ if(confirm('Apagar histórico e resultados desta página?'))
+  location.reload();
+};
+
+function aleatorio(){
+ const b=new Uint32Array(1);
+ crypto.getRandomValues(b);
+ return b[0]/4294967296;
+}
+
+function sortearPonderado(pool,k){
+ const a=pool.map(x=>({...x}));
+ const out=[];
+
+ while(out.length<k){
+  const pesos=a.map(x=>Math.max(.01,x.score));
+  const total=pesos.reduce((s,x)=>s+x,0);
+
+  let r=aleatorio()*total;
+  let idx=0;
+
+  for(;idx<a.length-1;idx++){
+   r-=pesos[idx];
+   if(r<0)break;
+  }
+
+  out.push(a[idx].n);
+  a.splice(idx,1);
+ }
+
+ return out.sort((a,b)=>a-b);
+}
+
+function rodizio(pool,k,j){
+ const a=pool.map(x=>x.n);
+ let seed=(Math.imul(j+1,2654435761)>>>0);
+
+ for(let i=a.length-1;i>0;i--){
+  seed=(Math.imul(seed,1664525)+1013904223)>>>0;
+  const t=seed%(i+1);
+  [a[i],a[t]]=[a[t],a[i]];
+ }
+
+ return a.slice(0,k).sort((x,y)=>x-y);
+}
+
+$('gerar').onclick=()=>{
+ try{
+  if(!RANK.length)
+   throw Error('Analise o histórico primeiro.');
+
+  const k=Number($('tamanho').value);
+  const q=Number($('quantidade').value);
+  const u=Number($('universo').value);
+
+  if(!Number.isInteger(k)||k<6||k>20||
+     !Number.isInteger(q)||q<1||q>100||
+     !Number.isInteger(u)||u<20||u>60||u<k)
+   throw Error('Parâmetros inválidos.');
+
+  const pool=RANK.slice(0,u);
+  const unicos=new Set();
+  const jogos=[];
+
+  let tentativas=0;
+
+  while(jogos.length<q&&tentativas<q*200){
+   const jogo=$('modo').value==='rodizio'
+    ?rodizio(pool,k,tentativas)
+    :sortearPonderado(pool,k);
+
+   const chave=jogo.join('-');
+
+   if(!unicos.has(chave)){
+    unicos.add(chave);
+    jogos.push(jogo);
+   }
+
+   tentativas++;
+  }
+
+  if(jogos.length!==q)
+   throw Error('Não foi possível produzir '+q+
+    ' jogos distintos. Reduza a quantidade ou altere o método.');
+
+  for(const jogo of jogos){
+   if(jogo.length!==k||
+      new Set(jogo).size!==k||
+      jogo.some(n=>n<1||n>60))
+    throw Error('Falha de auditoria interna.');
+  }
+
+  JOGOS=jogos;
+
+  $('jogos').innerHTML=jogos.map((j,i)=>
+   '<div class="jogo"><strong>Jogo '+
+   String(i+1).padStart(2,'0')+
+   '</strong> — '+j.map(pad).join(' ')+
+   '</div>'
+  ).join('');
+
+  mensagem('statusJogos',
+   'Auditoria aprovada: '+q+' jogos distintos, '+
+   k+' dezenas válidas em cada jogo.');
+
+  registro();
+
+ }catch(e){
+  JOGOS=[];
+  $('jogos').innerHTML='';
+  mensagem('statusJogos','ERRO: '+e.message,true);
+ }
+};
+
+async function copiar(s,id){
+ try{
+  await navigator.clipboard.writeText(s);
+  mensagem(id,'Copiado com sucesso.');
+ }catch(e){
+  mensagem(id,
+   'Cópia automática indisponível; selecione e copie manualmente.',
+   true);
+ }
+}
+
+$('copiarJogos').onclick=()=>{
+ if(!JOGOS.length)
+  return mensagem('statusJogos','Gere jogos primeiro.',true);
+
+ copiar(JOGOS.map((j,i)=>
+  'Jogo '+pad(i+1)+': '+j.map(pad).join(' ')
+ ).join('\n'),'statusJogos');
+};
+
+$('copiarRegistro').onclick=()=>{
+ if(!$('registro').value)
+  return mensagem('statusRegistro',
+   'Analise o histórico primeiro.',true);
+
+ copiar($('registro').value,'statusRegistro');
+};
+
+$('baixar').onclick=()=>{
+ if(!$('registro').value)
+  return mensagem('statusRegistro',
+   'Analise o histórico primeiro.',true);
+
+ const b=new Blob(
+  [$('registro').value],
+  {type:'application/json;charset=utf-8'}
+ );
+
+ const url=URL.createObjectURL(b);
+ const a=document.createElement('a');
+
+ a.href=url;
+ a.download='mega-passos-v29-registro-'+ALVO+'.json';
+
+ document.body.appendChild(a);
+ a.click();
+ a.remove();
+
+ setTimeout(()=>URL.revokeObjectURL(url),1000);
+
+ mensagem('statusRegistro',
+  'Download solicitado. Guarde o JSON e publique antes do sorteio para documentar a previsão.');
+};
+</script>
+</body>
+</html>
