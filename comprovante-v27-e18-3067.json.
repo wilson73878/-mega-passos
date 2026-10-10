@@ -1,0 +1,11 @@
+{
+  "tipo": "MEGA-PASSOS-INTEGRIDADE",
+  "versao": "V27-E18",
+  "concursoAlvo": 3067,
+  "treinamentoAte": 3066,
+  "assinaturaHistorico": "0b86c559",
+  "hashAlgoritmo": "SHA-256",
+  "sha256": "fcfa37add171d73e563b6a668492737a4d96dd5707c2bf81f45c568538900366",
+  "verificadoEmUTC": "2026-10-10T00:10:23.440Z",
+  "registroOriginal": "{\n  \"versao\": \"V26-E17\",\n  \"concursoAlvo\": 3067,\n  \"treinamentoAte\": 3066,\n  \"assinaturaHistorico\": \"0b86c559\",\n  \"geradoEmUTC\": \"2026-10-08T15:26:15.617Z\",\n  \"rankings\": {\n    \"F25\": [\n      48,\n      53,\n      4,\n      11,\n      36,\n      38,\n      43,\n      2,\n      6,\n      10\n    ],\n    \"F50\": [\n      11,\n      16,\n      48,\n      6,\n      43,\n      58,\n      21,\n      24,\n      30,\n      2\n    ],\n    \"M5\": [\n      11,\n      58,\n      16,\n      6,\n      42,\n      48,\n      43,\n      23,\n      53,\n      35\n    ]\n  }\n}"
+}
