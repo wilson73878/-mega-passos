@@ -66,7 +66,7 @@ de seis dezenas.
 placeholder="1 04 05 30 33 41 52
 2 ...
 ...
-3068 07 10 39 40 43 52"></textarea>
+3068 07 10 39 40 43 57"></textarea>
 
 <button onclick="gerar()">
 VALIDAR HISTÓRICO E GERAR REGISTRO
@@ -260,7 +260,7 @@ async function gerar() {
       .sort((a,b) => a - b)
       .join(",");
 
-    if (dezenas3068 !== "7,10,39,40,43,52") {
+    if (dezenas3068 !== "7,10,39,40,43,57") {
       throw Error(
         "O concurso 3068 não coincide com o resultado informado."
       );
