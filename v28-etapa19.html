@@ -1,0 +1,401 @@
+
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mega Passos V28 — Etapa 19</title>
+<style>
+*{box-sizing:border-box}
+body{
+  margin:0;background:#08111f;color:#edf3fb;
+  font:16px Arial,sans-serif
+}
+main{max-width:850px;margin:auto;padding:16px}
+section{
+  background:#182338;border-radius:17px;
+  padding:19px;margin:17px 0
+}
+h1{font-size:26px}
+h2{font-size:21px}
+p{line-height:1.5}
+textarea,input{
+  display:block;width:100%;
+  background:#0b1729;color:#fff;
+  border:1px solid #71809c;
+  border-radius:9px;padding:12px;
+  font:15px monospace;margin:8px 0
+}
+textarea{height:180px}
+button{
+  width:100%;border:0;border-radius:12px;
+  padding:15px;background:#a4d4a4;
+  color:#102819;font-size:16px;
+  font-weight:700;margin:7px 0
+}
+.secondary{background:#b3c2e2;color:#14213b}
+.note{color:#f6d17f}
+.ok{color:#a4d4a4}
+.err{color:#ff9a9a}
+pre{
+  white-space:pre-wrap;overflow-wrap:anywhere;
+  background:#0b1729;padding:12px;border-radius:9px
+}
+.small{font-size:13px;color:#bac7d7}
+</style>
+</head>
+<body>
+<main>
+
+<h1>Mega Passos V28 — Etapa 19</h1>
+<p>
+Registro de rankings F25 e F50, com assinatura
+SHA-256 e conferência de previsões congeladas.
+</p>
+
+<section>
+<h2>1. Histórico</h2>
+<p>
+Cole todos os concursos em ordem crescente,
+um por linha: número do concurso seguido
+de seis dezenas.
+</p>
+<p>Exemplo: <code>3068 07 10 39 40 43 52</code></p>
+
+<textarea id="hist"
+placeholder="1 04 05 30 33 41 52
+2 ...
+...
+3068 07 10 39 40 43 52"></textarea>
+
+<button onclick="gerar()">
+VALIDAR HISTÓRICO E GERAR REGISTRO
+</button>
+<p id="status"></p>
+</section>
+
+<section>
+<h2>2. Registro congelado</h2>
+
+<p class="note">
+F25 e F50 são calculados por frequência
+nas últimas 25 e 50 extrações.
+O M5 permanece pendente de reprodução exata
+da implementação histórica e não será
+substituído por aproximação.
+</p>
+
+<textarea id="json" readonly
+placeholder="O registro aparecerá aqui."></textarea>
+
+<button class="secondary" onclick="copiar('json')">
+COPIAR JSON
+</button>
+
+<label>SHA-256 do JSON acima</label>
+<input id="sha" readonly>
+
+<button class="secondary" onclick="copiar('sha')">
+COPIAR SHA-256
+</button>
+
+<p class="small">
+Publique o JSON e a assinatura em um commit
+do GitHub antes do sorteio.
+O horário informado pelo navegador
+não comprova anterioridade.
+</p>
+</section>
+
+<section>
+<h2>3. Conferir registro arquivado</h2>
+<p>
+Cole o JSON anteriormente publicado,
+sua assinatura SHA-256 e, somente após
+o sorteio, as seis dezenas sorteadas.
+A conferência usa exclusivamente
+os rankings do JSON arquivado.
+</p>
+
+<textarea id="importado"
+placeholder="JSON arquivado"></textarea>
+
+<input id="esperado"
+placeholder="SHA-256 arquivado">
+
+<input id="resultado"
+placeholder="Ex.: 01 04 17 33 41 52">
+
+<button onclick="conferir()">
+VERIFICAR INTEGRIDADE E CONFERIR
+</button>
+
+<pre id="saida"></pre>
+</section>
+
+</main>
+
+<script>
+"use strict";
+
+const el = id => document.getElementById(id);
+const fmt = n => String(n).padStart(2,"0");
+
+function parse6(t) {
+  const a = t.trim()
+    .split(/[\s,;\-]+/)
+    .filter(Boolean)
+    .map(Number);
+
+  if (
+    a.length !== 6 ||
+    a.some(x => !Number.isInteger(x) || x < 1 || x > 60) ||
+    new Set(a).size !== 6
+  ) {
+    throw Error(
+      "Cada resultado deve ter seis dezenas distintas entre 01 e 60."
+    );
+  }
+  return a;
+}
+
+function historico(s) {
+  const linhas = s.trim()
+    .split(/\r?\n/)
+    .filter(x => x.trim());
+
+  if (!linhas.length) {
+    throw Error("Cole o histórico completo.");
+  }
+
+  const h = [];
+
+  for (const linha of linhas) {
+    const v = linha.trim()
+      .split(/[\s,;\-]+/)
+      .filter(Boolean);
+
+    if (v.length !== 7) {
+      throw Error("Linha inválida: " + linha);
+    }
+
+    const n = Number(v[0]);
+
+    if (!Number.isSafeInteger(n) || n < 1) {
+      throw Error("Número de concurso inválido: " + linha);
+    }
+
+    const dezenas = parse6(v.slice(1).join(" "));
+
+    if (h.length && n !== h[h.length - 1].n + 1) {
+      throw Error(
+        "Sequência incompleta ou duplicada antes do concurso " + n
+      );
+    }
+
+    h.push({n, dezenas});
+  }
+
+  if (h[0].n !== 1) {
+    throw Error("O histórico deve começar no concurso 1.");
+  }
+
+  if (h.length < 100) {
+    throw Error("São necessários ao menos 100 concursos.");
+  }
+
+  return h;
+}
+
+function ranking(h, w) {
+  const cont = Array(61).fill(0);
+
+  for (const c of h.slice(-w)) {
+    for (const n of c.dezenas) {
+      cont[n]++;
+    }
+  }
+
+  return Array.from(
+    {length:60}, (_,i) => i + 1
+  )
+  .sort((a,b) => cont[b] - cont[a] || a - b)
+  .slice(0,10);
+}
+
+async function hash(s) {
+  if (!window.crypto || !window.crypto.subtle) {
+    throw Error("SHA-256 requer conexão HTTPS.");
+  }
+
+  const dados = new TextEncoder().encode(s);
+  const digest = await crypto.subtle.digest(
+    "SHA-256", dados
+  );
+
+  return Array.from(new Uint8Array(digest))
+    .map(x => x.toString(16).padStart(2,"0"))
+    .join("");
+}
+
+async function gerar() {
+  el("status").textContent = "";
+  el("status").className = "";
+  el("json").value = "";
+  el("sha").value = "";
+
+  try {
+    const h = historico(el("hist").value);
+    const ultimo = h[h.length - 1];
+
+    if (ultimo.n !== 3068) {
+      throw Error(
+        "Nesta etapa, o histórico deve terminar exatamente " +
+        "no concurso 3068; recebido " + ultimo.n + "."
+      );
+    }
+
+    const dezenas3068 = ultimo.dezenas
+      .slice()
+      .sort((a,b) => a - b)
+      .join(",");
+
+    if (dezenas3068 !== "7,10,39,40,43,52") {
+      throw Error(
+        "O concurso 3068 não coincide com o resultado informado."
+      );
+    }
+
+    const obj = {
+      versao: "V28-E19",
+      concursoAlvo: 3069,
+      treinamentoAte: 3068,
+      geradoEmUTC: new Date().toISOString(),
+      metodo: "frequencia-absoluta; desempate por dezena crescente",
+      rankings: {
+        F25: ranking(h,25),
+        F50: ranking(h,50)
+      },
+      M5: "NAO_CALCULADO: requer codigo historico validado",
+      ultimoResultado: ultimo.dezenas
+        .slice()
+        .sort((a,b) => a - b),
+      quantidadeConcursos: h.length
+    };
+
+    const s = JSON.stringify(obj,null,2);
+
+    el("json").value = s;
+    el("sha").value = await hash(s);
+
+    el("status").className = "ok";
+    el("status").textContent =
+      "Histórico validado: " + h.length +
+      " concursos. Registro 3069 gerado. " +
+      "Arquive ANTES do sorteio para caracterizar teste prospectivo.";
+
+  } catch(e) {
+    el("status").className = "err";
+    el("status").textContent = "ERRO: " + e.message;
+  }
+}
+
+async function conferir() {
+  const out = el("saida");
+  out.className = "";
+  out.textContent = "";
+
+  try {
+    const s = el("importado").value;
+    const sha = el("esperado").value.trim().toLowerCase();
+
+    if (!/^[a-f0-9]{64}$/.test(sha)) {
+      throw Error("SHA-256 inválido.");
+    }
+
+    if (await hash(s) !== sha) {
+      throw Error(
+        "INTEGRIDADE NÃO CONFIRMADA: " +
+        "o JSON não corresponde à assinatura."
+      );
+    }
+
+    const j = JSON.parse(s);
+
+    if (
+      j.versao !== "V28-E19" ||
+      j.concursoAlvo !== 3069 ||
+      j.treinamentoAte !== 3068
+    ) {
+      throw Error(
+        "Registro não corresponde à V28 / concurso 3069."
+      );
+    }
+
+    for (const k of ["F25","F50"]) {
+      const a = j.rankings?.[k];
+
+      if (
+        !Array.isArray(a) ||
+        a.length !== 10 ||
+        new Set(a).size !== 10 ||
+        a.some(n =>
+          !Number.isInteger(n) || n < 1 || n > 60
+        )
+      ) {
+        throw Error("Ranking " + k + " inválido.");
+      }
+    }
+
+    const sorteio = parse6(el("resultado").value);
+
+    const linhas = [
+      "Integridade SHA-256 CONFIRMADA.",
+      "Concurso 3069: " +
+        sorteio.slice()
+          .sort((a,b) => a - b)
+          .map(fmt).join(" ")
+    ];
+
+    for (const k of ["F25","F50"]) {
+      const ac = j.rankings[k]
+        .filter(n => sorteio.includes(n));
+
+      linhas.push(
+        k + ": " + ac.length + "/6 — " +
+        (ac.length ? ac.map(fmt).join(" ") : "nenhuma")
+      );
+    }
+
+    linhas.push("M5: não calculado nesta versão.");
+
+    out.className = "ok";
+    out.textContent = linhas.join("\n");
+
+  } catch(e) {
+    out.className = "err";
+    out.textContent = "ERRO: " + e.message;
+  }
+}
+
+async function copiar(id) {
+  const campo = el(id);
+  const v = campo.value;
+
+  if (!v) {
+    alert("Campo vazio.");
+    return;
+  }
+
+  try {
+    await navigator.clipboard.writeText(v);
+    alert("Copiado.");
+  } catch(e) {
+    campo.focus();
+    campo.select();
+    alert("Selecione e copie manualmente.");
+  }
+}
+</script>
+</body>
+</html>
